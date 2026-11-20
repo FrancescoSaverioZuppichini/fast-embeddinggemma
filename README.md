@@ -19,7 +19,8 @@ RTX 3090 at 300 W, 140 soft tokens, library thumbnails. "Stock" is the Hugging F
 | cold start | 509.5 s (compile) | 15-18 s | | B4 |
 
 The service rows were measured with the v2 service and its native picture preparation. This package's server prepares
-pictures with Pillow on CPU threads instead, which is fast enough that the card stays the limit (see `fast-embeddinggemma bench`).
+pictures with Pillow on CPU threads instead (2,097 img/s on 8 threads), and on the same 256 thumbnails it does 208.7 img/s at
+32 pictures per request with 2 in flight (-2.2%), and 133.7 at 1 picture per request. It starts in 22 s.
 
 **What INT8 costs:** recall@10 drops by 1.54 points (bf16: 0.69). That's measured on a frozen set of 2,200 pictures and 50
 judged text queries, against fp32 vectors, so it moves by about a point either way. If search quality matters more than
@@ -77,11 +78,7 @@ on_card = feg.embed(engine, grid, patches[None])  # (1, 768)
 ```bash
 fast-embeddinggemma bench ./pictures              # model-only img/s at 1, 8 and 32 pictures per call
 fast-embeddinggemma serve --port 8100             # the HTTP service (needs the [server] extra)
-fast-embeddinggemma convert-google bundle.litertlm out.safetensors   # needs the [google] extra
 ```
-
-`convert-google` turns Google's QAT LiteRT-LM bundle into an HF-layout checkpoint that `load(checkpoint=...)` accepts.
-It's a test tool: in our measurement Google's QAT model searched worse (R@10 -3.43 pt) than this package's own INT8.
 
 ## HTTP service
 
@@ -91,7 +88,7 @@ It's a test tool: in our measurement Google's QAT model searched worse (R@10 -3.
 
 How it handles work:
 - Pictures are prepared on CPU threads, then batched across requests on one GPU thread. Each batch takes the canvas whose oldest picture has waited longest, with no waiting window.
-- Text is always a search query. It gets the query prompt and runs the stock Hugging Face text tower; only the language model goes to the card. Moving queries onto the engine's own text tower would drop `transformers` and about 0.9 GB of card memory. That's a later milestone.
+- Text is always a search query. It gets the query prompt and runs the stock Hugging Face text tower, eager, about 25 ms per query; only the language model goes to the card. `torch.compile` would make a warm query 4 ms, but start-up 99 s instead of 22 s, and each new query length would recompile for up to 85 s. Moving queries onto the engine's own text tower would drop `transformers` and about 0.9 GB of card memory. That's a later milestone.
 - The engine's memory is fixed at load, so there is no per-process memory cap.
 - It opens any path it is sent, so keep it on 127.0.0.1.
 
@@ -103,7 +100,6 @@ How it handles work:
 | `EMBED_MIN_FREE_MB` | `900` | free video memory under which picture requests get 503 |
 | `EMBED_MAX_BATCH_IMAGES` | `32` | pictures per engine call |
 | `EMBED_DECODE_THREADS` | `8` | CPU threads that prepare pictures |
-| `EMBED_COMPILE` | `max-autotune-no-cudagraphs` | `torch.compile` mode of the query tower, or `none` |
 
 ## Limits
 

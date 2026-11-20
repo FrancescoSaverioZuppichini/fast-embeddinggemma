@@ -20,7 +20,6 @@ dependencies = [
 
 [project.optional-dependencies]
 server = ["fastapi>=0.162", "pydantic>=2.14", "transformers==5.22.2", "uvicorn>=0.54"]
-google = ["ai-edge-litert", "flatbuffers"]
 
 [project.scripts]
 fast-embeddinggemma = "fast_embeddinggemma.cli:main"

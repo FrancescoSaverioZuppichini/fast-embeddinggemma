@@ -27,7 +27,6 @@ CFG = {
     "dim": int(ENV("EMBED_DIM", "768")),
     "min_free_mb": int(ENV("EMBED_MIN_FREE_MB", "900")),
     "max_batch": int(ENV("EMBED_MAX_BATCH_IMAGES", "32")),
-    "compile": ENV("EMBED_COMPILE", "max-autotune-no-cudagraphs"),
     "threads": int(ENV("EMBED_DECODE_THREADS", "8")),
     "precision": ENV("EMBED_PRECISION", "int8"),
 }
@@ -56,7 +55,9 @@ def free_mb():
 
 
 def load_text():
-    """Tokenizer + the query encoder: only the Hugging Face language model goes to the card, the vision tower never does."""
+    """Tokenizer + the query encoder: only the Hugging Face language model goes to the card, the vision tower never does.
+    Eager on purpose: torch.compile made a warm query 4 ms instead of 25, but start-up 99 s instead of 22, and each new query length
+    recompiled for up to 85 s."""
     from transformers import AutoModel, AutoTokenizer
 
     hf = AutoModel.from_pretrained(CFG["model"], dtype=torch.bfloat16, attn_implementation="sdpa", audio_config=None)
@@ -67,8 +68,7 @@ def load_text():
         m = mask.unsqueeze(-1).float()
         return F.normalize((h.float() * m).sum(1) / m.sum(1), dim=-1)
 
-    compiled = encode if CFG["compile"] == "none" else torch.compile(encode, mode=CFG["compile"])
-    return AutoTokenizer.from_pretrained(CFG["model"]), compiled
+    return AutoTokenizer.from_pretrained(CFG["model"]), encode
 
 
 def embed_texts(texts):

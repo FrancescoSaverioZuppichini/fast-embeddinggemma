@@ -1,5 +1,4 @@
-"""fast-embeddinggemma serve | bench | convert-google. Each subcommand imports its own module, so `bench` needs no server
-extra and `convert-google` is the only one that needs the google extra."""
+"""fast-embeddinggemma serve | bench. Each subcommand imports its own module, so `bench` needs no server extra."""
 
 import argparse
 
@@ -16,12 +15,6 @@ def bench(args):
     run(args.folder, args.precision, args.n, tuple(args.sizes), args.threads)
 
 
-def convert_google(args):
-    from .convert import convert
-
-    convert(args.bundle, args.out)
-
-
 def main(argv=None):
     parser = argparse.ArgumentParser(prog="fast-embeddinggemma")
     commands = parser.add_subparsers(required=True)
@@ -36,9 +29,5 @@ def main(argv=None):
     p.add_argument("--sizes", type=int, nargs="+", default=[1, 8, 32], help="pictures per call")
     p.add_argument("--threads", type=int, default=8, help="CPU threads that prepare the pictures")
     p.set_defaults(run=bench)
-    p = commands.add_parser("convert-google", help="Google's QAT LiteRT-LM bundle -> HF-layout safetensors (test tool)")
-    p.add_argument("bundle")
-    p.add_argument("out")
-    p.set_defaults(run=convert_google)
     args = parser.parse_args(argv)
     args.run(args)
