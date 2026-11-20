@@ -1,0 +1,58 @@
+[project]
+name = "fast-embeddinggemma"
+version = "0.1.0"
+description = "Fast EmbeddingGemma 2 image embeddings: PyTorch + Triton, CUDA graphs, INT8."
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+requires-python = ">=3.11"
+# [Agent] Exact versions where the numbers live: the vectors, the bit-exact picture preparation and the speed were measured
+# on these, so a bump is a new measurement.
+dependencies = [
+    "huggingface-hub>=0.30",
+    "numpy>=2",
+    "pillow==13.0.0",
+    "safetensors>=0.5",
+    "torch==2.14.0",
+    "torchvision==0.29.0",
+    "triton==3.8.0",
+]
+
+[project.optional-dependencies]
+server = ["fastapi>=0.162", "pydantic>=2.14", "transformers==5.22.2", "uvicorn>=0.54"]
+google = ["ai-edge-litert", "flatbuffers"]
+
+[project.scripts]
+fast-embeddinggemma = "fast_embeddinggemma.cli:main"
+
+[dependency-groups]
+dev = ["pytest>=8", "ruff>=0.9"]
+
+[build-system]
+requires = ["uv_build>=0.13,<0.14"]
+build-backend = "uv_build"
+
+[tool.uv]
+# [Agent] CUDA graphs + Triton on an NVIDIA card: Linux x86_64 only, so the lock does not chase wheels nobody can run.
+environments = ["sys_platform == 'linux' and platform_machine == 'x86_64'"]
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu130" }
+torchvision = { index = "pytorch-cu130" }
+
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+# [Agent] The formatter owns code width; docstrings and one-line [Agent] comments may run past it.
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["gpu: needs an NVIDIA card"]

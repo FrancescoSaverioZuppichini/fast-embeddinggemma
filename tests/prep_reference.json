@@ -1,0 +1,535 @@
+{
+ "source": "locked v2 preparation: libprep f2d05e77 + its Pillow fallback, side 1135, 7 canvases at 140 tokens",
+ "synthetic": {
+  "webp_320x256": {
+   "file": "8ecb6f7f3ed2e22436d96a84dc9ad3499e11fa78967866cd5817c9e94545533e",
+   "canvas": [
+    10,
+    13
+   ],
+   "patches": "97735bf68c8325032e2deebcb46609055f4abe434e85ef75f7636e069414a4e2"
+  },
+  "webp_180x320": {
+   "file": "41e13bbd42cf94a85a078dd65da013dcb0c50e85f83e260f662e4a387d9f7e61",
+   "canvas": [
+    15,
+    8
+   ],
+   "patches": "87eeaf38c48ef1ef5c1e39b3f7f917caa186cbdc0ba8802ec23880ee4a319597"
+  },
+  "webp_320x180": {
+   "file": "c979079a901dd2b9c4eca1b617fdc540ed8e26ac58654e05b99d995352218dca",
+   "canvas": [
+    8,
+    15
+   ],
+   "patches": "c16f869ae3516509045c1777682e270b9f4202a79cbcfde9e8157e9e76d1e24d"
+  },
+  "jpeg_1600x1200": {
+   "file": "b532ba7d15b05b9631c0d011424398ef0537ad1f9eda37fcd939f38f3362036c",
+   "canvas": [
+    10,
+    13
+   ],
+   "patches": "57c51068c3959ec08c27cde03dde23a1e0b2e483510e5cbeff15c6e89853a661"
+  },
+  "jpeg_3000x2250": {
+   "file": "4dd41cf9344bebe5882a3391e29154eeea55cfe857d3b4471ed7b2d68e096275",
+   "canvas": [
+    10,
+    13
+   ],
+   "patches": "e221056b6ab2a8e7beb1811d418276c088f1b477a40d4b0fad575c8cfbce0781"
+  },
+  "jpeg_4600x1150": {
+   "file": "d5d4ea430c1fa035b3cdf652a9060bdc371ad8d89deb11bd59b7047faa0a37ef",
+   "canvas": [
+    8,
+    15
+   ],
+   "patches": "6b5449ff6959370e751ca899f4470952bb261e5ad0d89e33be04d95d82ce209f"
+  },
+  "png_300x300": {
+   "file": "53b3332d741dea788bd64b16f29eadffdf1772562e063882864f7f8bb77d6144",
+   "canvas": [
+    11,
+    11
+   ],
+   "patches": "c24487982372d3361f1296b98d243a4dd0e478fea6ad7dbd9024e1898f510486"
+  },
+  "jpeg_exif6_256x320": {
+   "file": "f00501f7923e186244ca876f7e594d68c9f895e6ed26de4f30f0d2f85939c6ee",
+   "canvas": [
+    10,
+    13
+   ],
+   "patches": "7f021af2a09fd4227a5519e8ae28249576171efcc866cc93cfa63c101046f437"
+  }
+ },
+ "library": [
+  {
+   "file": "725876222c6ef0df529089a8b71cb1a158f809f3923c3730f186dd8f2da58b7f",
+   "canvas": [
+    13,
+    10
+   ],
+   "patches": "2a8e3b1c1999b1a2d1af842d6588db773ecef1ff0f8267e6b50958408378e49b"
+  },
+  {
+   "file": "581e7650bf10ccab25fad2046d72b08d37e69af0aca151ebde3b30ae47acce47",
+   "canvas": [
+    15,
+    8
+   ],
+   "patches": "4a26d3b9b5b31476adf7593d471541cb31c8562c1d99590ca8602342caee61de"
+  },
+  {
+   "file": "96afec62ffa4cebb68dabaa5080e8151689168fa42bac27f7300a91fa3bf01a4",
+   "canvas": [
+    15,
+    8
+   ],
+   "patches": "84c6956582216a19d988030ccf2826d27c8cf523c7ba80322f66399ed9cfb28b"
+  },
+  {
+   "file": "bbbb903dd9e6bd00b1c656d2f9492fe09bafa15c59fcde032cee4028430257b1",
+   "canvas": [
+    13,
+    10
+   ],
+   "patches": "6e6e25c88ddcbe7e9459f8d954b294879db21e64390589fece5bb11414e0ebae"
+  },
+  {
+   "file": "4359341f1a5f3a9ff46f397762d3235276c58a928f3d2e5ac5dc08da16a0722c",
+   "canvas": [
+    13,
+    10
+   ],
+   "patches": "1f388d1d5d71e82f3402c841bfc4ee333aed12527538a929d620d058b713e768"
+  },
+  {
+   "file": "75d61b78808d126d232208717ab0fcf08ad887a8d8296ccf2c9ef6bdd9cbfe29",
+   "canvas": [
+    13,
+    10
+   ],
+   "patches": "86ec76c47739e4a8d20257a6822999812586c10180fcec844bdb896243dd8ddd"
+  },
+  {
+   "file": "6d52a225677736142a5946e90b0e9183eccf5ad24b5f12101f365ff0f42810d4",
+   "canvas": [
+    13,
+    10
+   ],
+   "patches": "220e7bca2b095da45b38a7037bc3a28f8a4bab9a17f377132385e8ecf3ec7c26"
+  },
+  {
+   "file": "85b51eac33cf8fca45ea5a62d7a3a4cc2d4f009d52c1bbe2b032e758207421d5",
+   "canvas": [
+    15,
+    8
+   ],
+   "patches": "713c9e5ec389967d649158cbb79856286e6fa0d60d1f40f3986c5c3d4d732c25"
+  },
+  {
+   "file": "0c882be352a01a244d2355cbebc4a2e7d7de5874b5cc3390cae16d1f22011704",
+   "canvas": [
+    13,
+    10
+   ],
+   "patches": "68b29dd620debbb34c5c3692d0d5c2fa77b658147990a20fab01d8f7c730a9f3"
+  },
+  {
+   "file": "8c6109559da8ecba2ab8419914673ecbd9b4d5978224c0f78f711358ab1e81fc",
+   "canvas": [
+    13,
+    10
+   ],
+   "patches": "22efe9054e3484312c12fa7f178a93b2209d597aefaa3368fbb7f0efaba57020"
+  },
+  {
+   "file": "b4608e5d5de0866190d642a95c73d1832525a03fc1b4213aab2b1f9edd88dfb8",
+   "canvas": [
+    13,
+    10
+   ],
+   "patches": "4d3d62fc0c34e973fec366753da7d3ee49abcc15e27054f8690ae90e37d9a739"
+  },
+  {
+   "file": "939dbf9a18f728cd7b50f066744be619cf3ddbe27685fa4897e9687d28283d94",
+   "canvas": [
+    15,
+    8
+   ],
+   "patches": "68294be3db711bc0d024a5c26d884fca03de0187553be2884bcd1399cdbee855"
+  },
+  {
+   "file": "235d67bd75a3864500ea8b3db7bcb04ce094e7f98a6b7283b66d4b6bbf534557",
+   "canvas": [
+    11,
+    11
+   ],
+   "patches": "e74356514ce0eee19c36f95d84984d45b19a00177e8b6f1404a6f34868b4432c"
+  },
+  {
+   "file": "ce709bfb4ffae3ffa8d5e500abcb705c0119aafeaadf33faa93c955c815f0020",
+   "canvas": [
+    15,
+    8
+   ],
+   "patches": "30a2ff5477669d9d8460e7d3309b135121f281437ea4cb4cfc3a2358209d0768"
+  },
+  {
+   "file": "6822330d76ec816a25b3726a669a889a34b6bb3e372dcd43aa4de0660c9ab0e9",
+   "canvas": [
+    15,
+    8
+   ],
+   "patches": "2821c7aba5a9d348f316ca4b9cfa84ed906a2edae77db34e165cc1af76c2f5bd"
+  },
+  {
+   "file": "22c58b0b27cfcc1cc43bcd7b874887e618c72e1059c4f091c2bbf0a5a80f8066",
+   "canvas": [
+    15,
+    8
+   ],
+   "patches": "cfc5f3bf49dec0db7aa3861483ca894309d7f164a142527d9633e83caa944671"
+  },
+  {
+   "file": "f6379f9c66fba6af952a1aee0c7c011ac63f25898f94671ae6fa9995449dda77",
+   "canvas": [
+    15,
+    8
+   ],
+   "patches": "fb2e3b1c22faa9c4faf53334d134c69499d2dd4d1a4401b6f1e07b64b9e32cfa"
+  },
+  {
+   "file": "bad62985620379b701a3a3788cbe5fddd8f502638afd5c66f3a4510a7d5620ff",
+   "canvas": [
+    11,
+    11
+   ],
+   "patches": "dcca74d0a35edcdf225a8ac111dcece14508953ecf2cbdb4f01d04f6b9597b66"
+  },
+  {
+   "file": "d0d3d45d2245b4433643e522b9df047aa70f72ce88dc1a8c2db453b964f9dbb4",
+   "canvas": [
+    11,
+    11
+   ],
+   "patches": "d7f94a9f38be1edc2757be9a6646a163ab15990866b61b7d8561a6314a4f192b"
+  },
+  {
+   "file": "56e0b5d3db8f29c64c48c4512980cef20e36bb260ef33600afe139b0dea99165",
+   "canvas": [
+    11,
+    11
+   ],
+   "patches": "61f2d628cb96aa4fa19f881c56bdea5a46218fb4c02ebc729c457c3b83318766"
+  },
+  {
+   "file": "3a0741f923e60c658d355e9eddb3c64ffcd658643188c297e2e75247db9c2e85",
+   "canvas": [
+    11,
+    11
+   ],
+   "patches": "2014e47d8243a0ff7fd912bcf55ed3ee5d6367acb3e6ae318dc68363d594d2d9"
+  },
+  {
+   "file": "eb9565e7e97e636dc60e824ae8b42ef77ff64059448c036d693062134e97c345",
+   "canvas": [
+    10,
+    13
+   ],
+   "patches": "f87bc33ac6fdb2ef5d207ffe324eb753ae33266ae63ebda0850856480ef71d1c"
+  },
+  {
+   "file": "4dc9f4391503ea05bc9273fbe438495f72c8c87d995131d01b3b8696391e467b",
+   "canvas": [
+    10,
+    13
+   ],
+   "patches": "586eed0f85d338a08312cb1c6f7c69480e6d4922c9fe3e31ba6e88ff3f4fc6a5"
+  },
+  {
+   "file": "80dc415f9331e6bc846a73c469469525e44b4849fdf6e2f64e671d30e230013e",
+   "canvas": [
+    10,
+    13
+   ],
+   "patches": "886a2ebc9fe427561d5f002469b90aebcc7b91f954fbbbd84c738b42188c1ec8"
+  },
+  {
+   "file": "d33dc6cb2c78abbee1bff7a7d811dfababa4630f5d6eb09c69c034e2448302e0",
+   "canvas": [
+    11,
+    11
+   ],
+   "patches": "a0d92c3eb3d2f680819e5ca64d5f71eb1427abc0cb77485e456a7359ad13c061"
+  },
+  {
+   "file": "c712310166b48e184f41cfa37f0867c1b0b3e91f99ad24c4dab166596ef5ca8b",
+   "canvas": [
+    11,
+    11
+   ],
+   "patches": "e346e2666d44de861058795b31d1d10a9fd6eb224c1595a77d8f6240ff0178d2"
+  },
+  {
+   "file": "47747233033aea68013f95bac3822a5a4ce4328e791dde4e1329a1f78f6d30d4",
+   "canvas": [
+    11,
+    11
+   ],
+   "patches": "12f6bc9b4838c45dbc3382bacc7b2b3021284f79c047deddbbe1c7f5323e0899"
+  },
+  {
+   "file": "f281b344ef8d63c263887a8df7c2330685010d7d2cc0c18beddffd91e8b30599",
+   "canvas": [
+    14,
+    9
+   ],
+   "patches": "f5e70fc5722a4770208a4ef7bc355e150c1df7738fa1deab54644f2508102d6d"
+  },
+  {
+   "file": "bf6410b12438e32d9ccf49af841f32c9a8e0bbcf45c503ffa74135793c741bdb",
+   "canvas": [
+    8,
+    15
+   ],
+   "patches": "dfa437ebd25c0bcf6fddd647ace10f8f26b8c4b059773b3575a521552a51f673"
+  },
+  {
+   "file": "277aaafa58b446c9193591dbbf7fd33b8436e35b4a896c9a04811bf431d04418",
+   "canvas": [
+    8,
+    15
+   ],
+   "patches": "4bcda494631248ffe3cd3fa25ea1fcd2358ed48eb174f161dc325c1f64d5d011"
+  },
+  {
+   "file": "9b214dd363afcbeadab0904668c782f2952ebbbc4101f5bb0d02147b312758b7",
+   "canvas": [
+    14,
+    9
+   ],
+   "patches": "2b09972e189d96f853b2451135d8fc9a50e7e64417cc918a41812c264905e23b"
+  },
+  {
+   "file": "9593c1da515f5c07d8503ea0f6734f28b74e7e6043828abdcc2812a3abe13c2e",
+   "canvas": [
+    10,
+    13
+   ],
+   "patches": "518f938db19f9e304455d5e4d377b6d1c4c1947b8e40024403622e8567a17d90"
+  },
+  {
+   "file": "129e44c9fc3a04b69b1b5866f1a6405089b832cacf3cb1225e4c0fa42216a1c8",
+   "canvas": [
+    14,
+    9
+   ],
+   "patches": "5e14f58eba1d0b3b89ae87419c1a750a4ad21887f18240edf48c892fb82a357e"
+  },
+  {
+   "file": "c801a759e8e1800a2b55cf1ea78796a70cfa9960885a8095307b80169669ec41",
+   "canvas": [
+    10,
+    13
+   ],
+   "patches": "bad9381914b664b38802ee42c4b84677bff8841720d29369021144db7d25313b"
+  },
+  {
+   "file": "70354bbf28a86d2fde177d62fe15793fa9551ef89cf5b0ba82c4242016822818",
+   "canvas": [
+    10,
+    13
+   ],
+   "patches": "912888d88f125c5108694b2a421407206318185ef0263eb830e8b7f034ee467c"
+  },
+  {
+   "file": "ba9576ad19dce270b763d16263ffe66eccb93312b3fcd143561e1784e56a7f43",
+   "canvas": [
+    14,
+    9
+   ],
+   "patches": "3b9ac82759b57e02a280e09a904960b0f9103be7876e5e55ca633d8f817c17ab"
+  },
+  {
+   "file": "8c84b845e3994fb91b83dfc39ebef87542b1236d8ebef9fe43c5bed794373eab",
+   "canvas": [
+    10,
+    13
+   ],
+   "patches": "336bc949221e6ece7e152bf9ddb256e3b37c4c41d591bf4383c52386a743e370"
+  },
+  {
+   "file": "9abb7ca88b19331212657eabc75cf31882e7f13733c54e10cd6ddec599489857",
+   "canvas": [
+    8,
+    15
+   ],
+   "patches": "16615f53f69f8c1d8e8301652471e3addb481a3517dcddea35e63306c8aafc05"
+  },
+  {
+   "file": "88d5c4390a4b73669bfc2039c43a5925a27c5711ad6a50a4a34940d9a11fb532",
+   "canvas": [
+    8,
+    15
+   ],
+   "patches": "f248be97961b600653cb475184b50344d19957ab84eaf3b88ea412014508255b"
+  },
+  {
+   "file": "90f4cb2d5b84ced60b80c07e4379ec2e2af3170fa6508a992f28356f9650fdc8",
+   "canvas": [
+    10,
+    13
+   ],
+   "patches": "212d52e53d5e9e590aaa92ee9820fff043b3f94938c6fa44d52080cf31f52da1"
+  },
+  {
+   "file": "0ad9ea92eb42b5b0849a07e3e355f05e5130ff346c584f65c7b63c703a708944",
+   "canvas": [
+    8,
+    15
+   ],
+   "patches": "115f964b5183566771307ffdef4a97170d99690ec34645e50691e4e9a994031e"
+  },
+  {
+   "file": "6f776067ece7a4ee70210bffec52e4ca615ec1120c0a23707aa964767ffc8f8d",
+   "canvas": [
+    8,
+    15
+   ],
+   "patches": "ef63421c94136cbd2dc7faa972073b4e95980b82e65d7bb5ace89b15200909eb"
+  },
+  {
+   "file": "0e1504015accf95e8eeb4b8cb347e4a97eca37f60a0e430fa2bbd1a6499db472",
+   "canvas": [
+    9,
+    14
+   ],
+   "patches": "5824a5bf9e3cead4456a060f6c709898930494bbede4fa882800c8935b90fb41"
+  },
+  {
+   "file": "83eaf11e8d8398d5b86d232e335fc2e4a0ee359f69bea5c779b964ce77e09ed7",
+   "canvas": [
+    9,
+    14
+   ],
+   "patches": "a6fe7067f04c9a9eb4cdb9ad1f30d30dea8c0fa152e1f9c644d02ea03793a4fd"
+  },
+  {
+   "file": "7821f6af2b0357b7e5f08563705c00c385131ebc3f2b790bdf117ac1b8f6bff8",
+   "canvas": [
+    9,
+    14
+   ],
+   "patches": "ab19cae321028153c5356fd94979e3bcc02df569ae018ec4542ba012ab97d92d"
+  },
+  {
+   "file": "03e18b3f1c950e3ad69995ddcbe1b4a2bc7ebadf68a076bd5fe894256dc19729",
+   "canvas": [
+    14,
+    9
+   ],
+   "patches": "098e7123af45dcf4936bfe74a9b9ded0811af179f878df35f29eac6c8beae005"
+  },
+  {
+   "file": "3ff1fbb7b7ed66a83bf7cc54af061fc2b42fba12f4f7d87a6711300a98bf5082",
+   "canvas": [
+    9,
+    14
+   ],
+   "patches": "f1c9fc6de91d303c89832fe815c99c4c43dfad725664fd432b5560fe16df1571"
+  },
+  {
+   "file": "7e5a4146261a82ef38e82b04d213697fa271c3bc0026884053f3571c06cf7878",
+   "canvas": [
+    8,
+    15
+   ],
+   "patches": "0feb4b2c9b9822c8c45f4dc5e935e84c9f7adbd57ccb0085a11a9191d5128b44"
+  },
+  {
+   "file": "477df57ef044d3c5d16b636ea55e53d1e483859aa5101a83c4a4940bb7109caa",
+   "canvas": [
+    9,
+    14
+   ],
+   "patches": "f9961376ad99c2e9857dec44c1d2839c8ad0ef64cf441b9bcbf64a0d8ffa2faa"
+  },
+  {
+   "file": "8ffa8c7266a0bba58588705f55113611bd3b5d02c374d9a16462f3c6cdf1be60",
+   "canvas": [
+    14,
+    9
+   ],
+   "patches": "02d06fe86f2a8cb4a4bd11b82d10e9aa94123a96b9b5417a3bd4ef1d70d4b21f"
+  },
+  {
+   "file": "f53bf4a96b1faedc7d82c6d48771dd6a35ee3e04860748d202a8260d9cbb84ee",
+   "canvas": [
+    13,
+    10
+   ],
+   "patches": "ef588ea7d319ec0a22df46dd1761a9571b576162f749b7ae2e61c128d822e32a"
+  },
+  {
+   "file": "9e762a6840e09cc680a7e861c701f0eea48e1ba3f1614f525f2fd759d9703144",
+   "canvas": [
+    13,
+    10
+   ],
+   "patches": "a75156175304d48b81cd75f0da69379b3e451efcffaf740e88bfdc4ae02389e1"
+  },
+  {
+   "file": "b0e397a8c0939aae4eda2e66b68c3e69dcf6fa434cf3f1223ccda90d1346529e",
+   "canvas": [
+    13,
+    10
+   ],
+   "patches": "dfdbcda20e4e805d5eca8cbe8d4ef6ea220a444862d0cd321001d4370f225403"
+  },
+  {
+   "file": "ef47e7f506ca4deef492eb6cdca7165d064abdc624487295467010871698e8b2",
+   "canvas": [
+    13,
+    10
+   ],
+   "patches": "eeb67de16fd70e4595aeec1cff41ad45f3c6bc6c45ab8a2f9b4bc85f3a28eaff"
+  },
+  {
+   "file": "4edfe8b1872a2473b9c2e9ce8eb44b77de0264a7026eea27accef87d1837882c",
+   "canvas": [
+    13,
+    10
+   ],
+   "patches": "f6fe3d8738bc4af64feaab174eadac49e78042e3c2e184a4c78487a7317b2695"
+  },
+  {
+   "file": "645bc09a1813db1b680ba2db730d3aef94d6227537e0351c199537f1dfd9b7af",
+   "canvas": [
+    11,
+    11
+   ],
+   "patches": "5d5092620fc40178b7adcfc7484547366d67936f3891137ff44e97f56e62fb89"
+  },
+  {
+   "file": "ea22f64e1c8af3d3fab4a6324c08dd73a04e1655f4825a9c865cc510f57878f4",
+   "canvas": [
+    13,
+    10
+   ],
+   "patches": "f3d7fb2ba3b025e5db9a6ab4761ef30ecad5ed13acf2a06ef0b070a551ebc9b0"
+  },
+  {
+   "file": "b0a8680c01ee9f4bab1320f03a04df08ec3a872a476720ea4ecc46ebc3bf49c9",
+   "canvas": [
+    13,
+    10
+   ],
+   "patches": "aa129c9d542e351ffc3cb6b3bb77ba822e3354fae35ac68102a0eb716ac19a46"
+  }
+ ]
+}
