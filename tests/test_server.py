@@ -3,6 +3,7 @@ with pictures sent by path, as uploaded bytes and over gRPC, against the Python 
 
 import base64
 import socket
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -19,12 +20,11 @@ def test_settings_reject_unknown_dim(monkeypatch):
 
 
 def test_paths_allowed(tmp_path):
-    inside, outside = tmp_path / "a.jpg", "/etc/passwd"
-    assert Settings(path_roots=str(tmp_path)).allows(str(inside))
-    assert not Settings(path_roots=str(tmp_path)).allows(outside)
-    assert not Settings(path_roots=str(tmp_path)).allows(str(tmp_path / ".." / "x.jpg"))
-    assert Settings(host="127.0.0.1").allows(outside)
-    assert not Settings(host="0.0.0.0").allows(outside)
+    settings = Settings(path_roots=str(tmp_path))
+    assert settings.allows((tmp_path / "a.jpg").resolve())
+    assert not settings.allows(Path("/etc/passwd"))
+    assert not settings.allows((tmp_path / ".." / "x.jpg").resolve())
+    assert not Settings().allows(Path("/etc/passwd")), "no roots, no paths"
 
 
 def test_input_has_one_source():
@@ -47,13 +47,11 @@ def test_service(tmp_path, pictures, monkeypatch):
 
     import fast_embeddinggemma as feg
     from fast_embeddinggemma.server import embed_pb2, embed_pb2_grpc
-    from fast_embeddinggemma.server.config import get_settings
     from fast_embeddinggemma.server.main import app
 
     port = free_port()
     monkeypatch.setenv("EMBED_PATH_ROOTS", str(tmp_path))
     monkeypatch.setenv("EMBED_GRPC_PORT", str(port))
-    get_settings.cache_clear()
     names = ["webp_320x256", "jpeg_1600x1200", "png_300x300"]
     for n in names:
         (tmp_path / n).write_bytes(pictures[n])
@@ -65,11 +63,16 @@ def test_service(tmp_path, pictures, monkeypatch):
 
     with TestClient(app) as client:
         model = client.get("/health").json()["model"]
+        assert model == "google/embeddinggemma-2@int8"
         inputs = [{"id": n, "path": str(tmp_path / n)} for n in names] + [{"id": "q", "text": "a cat on a sofa"}]
         by_path = client.post("/embed", json={"model": model, "inputs": inputs}).json()
         assert [v["id"] for v in by_path["vectors"]] == [*names, "q"] and by_path["failed"] == []
         files = [("files", (n, pictures[n])) for n in names]
         uploaded = client.post("/embed/files", files=files).json()
+        # [Agent] Two uploads with one name: each still gets its own picture's vector.
+        same = [("files", ("photo.jpg", pictures[n])) for n in names[:2]]
+        twins = client.post("/embed/files", files=same).json()
+        assert [v["id"] for v in twins["vectors"]] == ["photo.jpg", "photo.jpg"]
         outside = client.post("/embed", json={"model": model, "inputs": [{"id": "x", "path": "/etc/hostname"}]}).json()
         assert outside["failed"][0]["error"] == "path outside EMBED_PATH_ROOTS"
         assert client.post("/embed", json={"model": "other", "inputs": inputs}).status_code == 409
@@ -82,5 +85,5 @@ def test_service(tmp_path, pictures, monkeypatch):
         engine = client.app.state.batcher["engine"]
         reference = feg.embed_images(engine, [pictures[n] for n in names])
     # [Agent] float16 transport costs ~1e-3; batching across requests moves INT8 vectors up to ~3e-3 (see test_order).
-    for got in (vectors(by_path)[:3], vectors(uploaded), over_grpc):
-        assert np.einsum("ij,ij->i", got, reference).min() > 0.99
+    for got in (vectors(by_path)[:3], vectors(uploaded), over_grpc, vectors(twins)):
+        assert np.einsum("ij,ij->i", got, reference[: len(got)]).min() > 0.99

@@ -18,7 +18,7 @@ class Input(BaseModel):
 
 
 class EmbedRequest(BaseModel):
-    model: str = Field(description="must be the model the service runs (EMBED_MODEL)")
+    model: str = Field(description="must be the tag /health reports: checkpoint@precision")
     inputs: list[Input]
     query: bool = Field(False, description="a search: skips the free-memory floor kept for background batches")
 
@@ -26,7 +26,7 @@ class EmbedRequest(BaseModel):
         "json_schema_extra": {
             "examples": [
                 {
-                    "model": "google/embeddinggemma-2",
+                    "model": "google/embeddinggemma-2@int8",
                     "inputs": [{"id": "p1", "path": "/photos/beach.jpg"}, {"id": "q1", "text": "red dress on a beach"}],
                 }
             ]
@@ -57,7 +57,7 @@ class Queue(BaseModel):
 
 
 class Health(BaseModel):
-    model: str
+    model: str = Field(description="checkpoint@precision; requests send it")
     dims: int
     freeVramMb: int
     queue: Queue

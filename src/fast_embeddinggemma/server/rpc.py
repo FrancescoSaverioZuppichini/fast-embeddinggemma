@@ -17,17 +17,18 @@ class Embedder(embed_pb2_grpc.EmbedderServicer):
     async def Embed(
         self, request: embed_pb2.EmbedRequest, context: grpc.aio.ServicerContext
     ) -> embed_pb2.EmbedResponse:
-        settings = self.state["settings"]
-        if request.model != settings.model:
-            await context.abort(grpc.StatusCode.FAILED_PRECONDITION, f"this service runs {settings.model}")
-        items = [to_item(i) for i in request.inputs]
+        tag, dims = self.state["settings"].tag, self.state["settings"].dim
+        if request.model != tag:
+            await context.abort(grpc.StatusCode.FAILED_PRECONDITION, f"this service runs {tag}, not {request.model}")
         try:
-            vectors, failed = await batcher.embed_inputs(self.state, items, request.query)
+            vectors, failed = await batcher.embed_inputs(
+                self.state, [to_item(i) for i in request.inputs], request.query
+            )
         except batcher.Busy as error:
             await context.abort(grpc.StatusCode.RESOURCE_EXHAUSTED, str(error))
         return embed_pb2.EmbedResponse(
-            model=settings.model,
-            dims=settings.dim,
+            model=tag,
+            dims=dims,
             vectors=[embed_pb2.Vector(id=i, vec=v) for i, v in vectors],
             failed=[embed_pb2.Failure(id=i, error=e) for i, e in failed],
         )
@@ -48,9 +49,10 @@ class Embedder(embed_pb2_grpc.EmbedderServicer):
 
 async def serve(state: dict) -> grpc.aio.Server:
     settings = state["settings"]
-    # [Agent] gRPC refuses messages over 4 MB by default; a batch of original photos is far bigger.
-    limit = settings.max_upload_mb * settings.max_queued << 20
-    server = grpc.aio.server(options=[("grpc.max_receive_message_length", min(limit, 2**31 - 1))])
+    # [Agent] gRPC refuses messages over 4 MB by default. Room for one full engine batch of pictures at the size limit,
+    # capped at 1 GiB, since a whole message sits in memory before the handler sees it.
+    limit = min(settings.max_upload_mb * settings.max_batch, 1024) << 20
+    server = grpc.aio.server(options=[("grpc.max_receive_message_length", limit)])
     embed_pb2_grpc.add_EmbedderServicer_to_server(Embedder(state), server)
     server.add_insecure_port(f"{settings.host}:{settings.grpc_port}")
     await server.start()

@@ -11,11 +11,15 @@ def list_pictures(folder: str) -> list[Path]:
 
 
 def serve(args: argparse.Namespace) -> None:
+    import logging
+
     import uvicorn
 
-    from .server.config import get_settings
+    from .server.config import Settings
 
-    settings = get_settings()
+    # [Agent] The service's events go through stdlib logging; without a handler they would print nothing.
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+    settings = Settings()
     uvicorn.run("fast_embeddinggemma.server.main:app", host=settings.host, port=settings.port)
 
 

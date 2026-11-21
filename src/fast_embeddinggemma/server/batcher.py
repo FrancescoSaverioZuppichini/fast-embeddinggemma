@@ -1,14 +1,18 @@
 """One GPU thread serves every request, HTTP or gRPC: search queries first, then the canvas whose oldest picture has waited
-longest, up to max_batch pictures from any requests in one engine call. Pictures are prepared on CPU threads before they queue.
-The queue lives only in memory and only for in-flight work: durable queueing belongs to the caller (stash keeps it in its
-database). Past max_queued waiting pictures a request gets Busy, which the caller answers as 503 / RESOURCE_EXHAUSTED."""
+longest, up to max_batch pictures from any requests in one engine call. Pictures are prepared on CPU threads and each joins
+the queue as soon as it is ready. The queue lives only in memory and only for in-flight work: durable queueing belongs to
+the caller (stash keeps it in its database). Past max_queued pictures in flight a request gets Busy, which the caller
+answers as 503 / RESOURCE_EXHAUSTED."""
 
 import asyncio
 import logging
+import os
 import threading
 import time
 from collections import deque
-from concurrent.futures import Future, InvalidStateError, ThreadPoolExecutor
+from collections.abc import Awaitable
+from concurrent.futures import Future, ThreadPoolExecutor
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -34,7 +38,7 @@ Item = tuple[str, str, str | bytes]  # (id, "path" | "data" | "text", source)
 
 
 class Busy(Exception):
-    """More pictures are waiting than EMBED_MAX_QUEUED, or the card is short of memory: try again later."""
+    """More pictures are in flight than EMBED_MAX_QUEUED, or the card is short of memory: try again later."""
 
 
 def start(settings: Settings) -> dict:
@@ -49,9 +53,12 @@ def start(settings: Settings) -> dict:
         texts=deque(),
         ready=threading.Condition(),
         running=True,
+        inflight=0,
     )
     meter.create_observable_gauge(
-        "embed.queue.depth", callbacks=[lambda options: [Observation(queued(state))]], description="pictures waiting"
+        "embed.queue.depth",
+        callbacks=[lambda options: [Observation(state["inflight"])]],
+        description="pictures in flight",
     )
     state["thread"] = threading.Thread(target=run, args=(state,), name="gpu", daemon=True)
     state["thread"].start()
@@ -59,11 +66,12 @@ def start(settings: Settings) -> dict:
 
 
 def stop(state: dict) -> None:
+    """Finish what was admitted: the CPU threads queue their pictures, then the GPU thread empties the queue and exits."""
+    state["prep"].shutdown(cancel_futures=True)
     with state["ready"]:
         state["running"] = False
         state["ready"].notify()
     state["thread"].join()
-    state["prep"].shutdown(cancel_futures=True)
 
 
 def queued(state: dict) -> int:
@@ -76,149 +84,155 @@ def free_mb() -> int:
 
 def health(state: dict) -> dict:
     settings, free = state["settings"], free_mb()
+    # [Agent] A stopped GPU thread answers nothing, so it reads as not ok and callers pause instead of waiting on it.
+    ok = free >= settings.min_free_mb and state["thread"].is_alive()
     return dict(
-        model=settings.model,
+        model=settings.tag,
         dims=settings.dim,
         freeVramMb=free,
-        queue=dict(images=queued(state), texts=len(state["texts"])),
-        vram="low" if free < settings.min_free_mb else "ok",
+        queue=dict(images=state["inflight"], texts=len(state["texts"])),
+        vram="ok" if ok else "low",
     )
 
 
-def resolve(future: Future, value: object) -> None:
-    """Hand a future its result or exception, unless its caller already gave up on it."""
-    try:
-        if isinstance(value, BaseException):
-            future.set_exception(value)
-        else:
-            future.set_result(value)
-    except InvalidStateError:
-        pass
+def take(state: dict) -> tuple[Grid | None, list]:
+    """Under the lock: all waiting queries, else up to max_batch pictures of the canvas whose oldest picture waited longest."""
+    pictures, texts = state["pictures"], state["texts"]
+    if texts:
+        return None, [texts.popleft() for _ in range(len(texts))]
+    grid = min((g for g, q in pictures.items() if q), key=lambda g: pictures[g][0][0])
+    return grid, [pictures[grid].popleft() for _ in range(min(len(pictures[grid]), state["settings"].max_batch))]
 
 
 def run(state: dict) -> None:
-    """The GPU thread: waits for work, takes all waiting queries or one picture batch, runs it outside the lock."""
-    pictures, texts, max_batch = state["pictures"], state["texts"], state["settings"].max_batch
+    """The GPU thread: waits for work, runs one batch outside the lock, hands every job its vector or the batch's error.
+    Exits once stopped and the queue is empty, so shutdown finishes the work already admitted."""
     while True:
         with state["ready"]:
-            while state["running"] and not texts and not queued(state):
+            while state["running"] and not state["texts"] and not queued(state):
                 state["ready"].wait()
-            if not state["running"]:
+            if not state["texts"] and not queued(state):
                 return
-            if texts:
-                grid, jobs = None, [texts.popleft() for _ in range(len(texts))]
+            grid, jobs = take(state)
+        # [Agent] A job whose caller gave up (a cancelled request) is dropped before it costs card time; the rest are
+        # marked running, so they can no longer be cancelled and setting their result cannot fail.
+        jobs = [job for job in jobs if job[-1].set_running_or_notify_cancel()]
+        if not jobs:
+            continue
+        try:
+            values = run_texts(state, jobs) if grid is None else run_pictures(state, grid, jobs)
+        except Exception as error:
+            log.exception("embed.queries.failed" if grid is None else "embed.batch.failed", extra={"jobs": len(jobs)})
+            values = [error] * len(jobs)
+        for job, value in zip(jobs, values, strict=True):
+            if isinstance(value, BaseException):
+                job[-1].set_exception(value)
             else:
-                grid = min((g for g, q in pictures.items() if q), key=lambda g: pictures[g][0][0])
-                jobs = [pictures[grid].popleft() for _ in range(min(len(pictures[grid]), max_batch))]
-        if grid is None:
-            run_texts(state, jobs)
-        else:
-            run_pictures(state, grid, jobs)
+                job[-1].set_result(value)
 
 
-def run_texts(state: dict, jobs: list[tuple[list[str], Future]]) -> None:
+def run_texts(state: dict, jobs: list[tuple[list[str], Future]]) -> list[np.ndarray]:
     """Every waiting query of every request in one call; each request gets its rows back."""
     batch = [t for request, _ in jobs for t in request]
     with tracer.start_as_current_span("embed.queries", attributes={"texts": len(batch)}):
-        try:
-            vectors = queries.embed(state["engine"]["queries"], batch)
-        except Exception as error:
-            log.exception("embed.queries.failed", extra={"texts": len(batch)})
-            for _, future in jobs:
-                resolve(future, error)
-            return
+        vectors = queries.embed(state["engine"]["queries"], batch)
     TEXTS.add(len(batch))
-    at = 0
-    for request, future in jobs:
-        resolve(future, vectors[at : at + len(request)])
-        at += len(request)
+    ends = np.cumsum([len(request) for request, _ in jobs])
+    return np.split(vectors, ends[:-1])
 
 
-def run_pictures(state: dict, grid: Grid, jobs: list[tuple[float, torch.Tensor, Future]]) -> None:
+def run_pictures(state: dict, grid: Grid, jobs: list[tuple[float, torch.Tensor, Future]]) -> np.ndarray:
     """One engine call for up to max_batch pictures of one canvas, from any requests."""
     canvas = f"{grid[0]}x{grid[1]}"
     t0 = time.perf_counter()
     with tracer.start_as_current_span("embed.batch", attributes={"canvas": canvas, "pictures": len(jobs)}):
-        try:
-            vectors = embed(state["engine"], grid, [patches[None] for _, patches, _ in jobs]).cpu().numpy()
-        except Exception as error:
-            log.exception("embed.batch.failed", extra={"canvas": canvas, "pictures": len(jobs)})
-            for *_, future in jobs:
-                resolve(future, error)
-            return
+        vectors = embed(state["engine"], grid, [patches[None] for _, patches, _ in jobs]).cpu().numpy()
     BATCH_MS.record((time.perf_counter() - t0) * 1e3, {"canvas": canvas})
     PICTURES.add(len(jobs))
-    for (_, _, future), vector in zip(jobs, vectors, strict=True):
-        resolve(future, vector)
+    return vectors
 
 
-def prepare(source: str | bytes) -> tuple[Grid, torch.Tensor]:
+def submit_picture(state: dict, kind: str, source: str | bytes) -> Future:
+    """On a CPU thread: check and prepare one picture and queue it at once; returns the future of its vector."""
+    if kind == "path":
+        # [Agent] The file opened is the resolved path that was checked, so a symlink cannot point the read elsewhere.
+        path = Path(os.fsdecode(source)).resolve()
+        if not state["settings"].allows(path):
+            raise PermissionError("path outside EMBED_PATH_ROOTS")
+        source = str(path)
     grid, patches = process(source)
-    # [Agent] Pinned here, on the CPU threads, so the GPU thread's copy into the graph slot is a DMA, not a staged copy.
-    return grid, patches.pin_memory()
-
-
-def submit(state: dict, pictures: list[tuple[Grid, torch.Tensor]], texts: list[str]) -> list[Future]:
-    """Queue one request's pictures (one future each) and its texts (one future for all); Busy if the queue is full."""
-    futures = [Future() for _ in pictures]
-    texts_future = Future()
+    # [Agent] Pinned here, on the CPU thread, so the GPU thread's copy into the graph slot is a DMA, not a staged copy.
+    patches = patches.pin_memory()
+    future = Future()
     with state["ready"]:
-        if queued(state) + len(pictures) > state["settings"].max_queued:
-            raise Busy(f"more than {state['settings'].max_queued} pictures are waiting")
-        now = time.perf_counter()
-        for (grid, patches), future in zip(pictures, futures, strict=True):
-            state["pictures"][grid].append((now, patches, future))
-        if texts:
-            state["texts"].append((texts, texts_future))
+        state["pictures"][grid].append((time.perf_counter(), patches, future))
         state["ready"].notify()
-    return futures + ([texts_future] if texts else [])
+    return future
+
+
+def submit_texts(state: dict, texts: list[str]) -> Future:
+    future = Future()
+    with state["ready"]:
+        state["texts"].append((texts, future))
+        state["ready"].notify()
+    return future
+
+
+async def embed_picture(state: dict, kind: str, source: str | bytes) -> np.ndarray:
+    future = await asyncio.get_running_loop().run_in_executor(state["prep"], submit_picture, state, kind, source)
+    return await asyncio.wrap_future(future)
 
 
 async def embed_inputs(
     state: dict, items: list[Item], query: bool = False
 ) -> tuple[list[tuple[str, bytes]], list[tuple[str, str]]]:
-    """(id, kind, source) inputs -> ([(id, float16 vector bytes)], [(id, error)]), vectors in input order. A picture that
-    cannot be read, or a path outside EMBED_PATH_ROOTS, fails alone. Raises Busy (nothing queued) when the service is full."""
+    """(id, kind, source) inputs -> ([(id, float16 vector bytes)], [(id, error)]), both in input order. A picture that
+    cannot be read, is over max_upload_mb or lies outside EMBED_PATH_ROOTS fails alone. Raises Busy (nothing queued)
+    when the service is full."""
     settings = state["settings"]
-    failed: dict[str, str] = {}
+    # [Agent] Results are kept by input position, never by id: two inputs may share an id (two uploads named photo.jpg).
+    results: list[object] = [None] * len(items)
     pictures, texts = [], []
-    for i, kind, s in items:
+    for k, (_, kind, source) in enumerate(items):
         if kind == "text":
-            texts.append((i, s))
-        elif kind == "path" and not settings.allows(s):
-            failed[i] = "path outside EMBED_PATH_ROOTS"
+            texts.append(k)
+        elif kind == "data" and len(source) > settings.max_upload_mb << 20:
+            results[k] = ValueError(f"over {settings.max_upload_mb} MB")
         elif kind in ("path", "data"):
-            pictures.append((i, s))
+            pictures.append(k)
         else:
-            failed[i] = "an input needs data, path or text"
+            results[k] = ValueError("an input needs data, path or text")
     if pictures and not query and free_mb() < settings.min_free_mb:
         raise Busy("not enough free card memory")
-    loop = asyncio.get_running_loop()
-    prepared = await asyncio.gather(
-        *[loop.run_in_executor(state["prep"], prepare, s) for _, s in pictures], return_exceptions=True
-    )
-    ready = []
-    for (i, _), result in zip(pictures, prepared, strict=True):
-        if isinstance(result, BaseException):
-            failed[i] = str(result) or type(result).__name__
-        else:
-            ready.append((i, result))
-    futures = submit(state, [p for _, p in ready], [s for _, s in texts])
-    results = await asyncio.gather(*[asyncio.wrap_future(f) for f in futures], return_exceptions=True)
-    rows = {i: r for (i, _), r in zip(ready, results[: len(ready)], strict=True)}
+    # [Agent] Pictures count from admission until the request ends, so ones still decoding hold their place too.
+    with state["ready"]:
+        if state["inflight"] + len(pictures) > settings.max_queued:
+            raise Busy(f"more than {settings.max_queued} pictures are in flight")
+        state["inflight"] += len(pictures)
+    try:
+        jobs: list[Awaitable[Any]] = [embed_picture(state, *items[k][1:]) for k in pictures]
+        if texts:
+            jobs.append(asyncio.wrap_future(submit_texts(state, [items[k][2] for k in texts])))
+        done = await asyncio.gather(*jobs, return_exceptions=True)
+    finally:
+        with state["ready"]:
+            state["inflight"] -= len(pictures)
+    for k, row in zip(pictures, done, strict=False):
+        results[k] = row
     if texts:
-        batch = results[-1]
-        rows |= {i: (batch if isinstance(batch, BaseException) else batch[k]) for k, (i, _) in enumerate(texts)}
-    vectors = []
-    for i, _, _ in items:
-        row = rows.get(i)
-        if isinstance(row, BaseException):
-            failed[i] = str(row) or type(row).__name__
-        elif row is not None and np.isfinite(row).all():
-            vectors.append((i, cut(row[None], settings.dim)[0].astype("<f2").tobytes()))
-        elif row is not None:
-            failed[i] = "the model gave a vector that is not finite"
+        batch = done[-1]
+        for n, k in enumerate(texts):
+            results[k] = batch if isinstance(batch, BaseException) else batch[n]
+    good = [k for k, row in enumerate(results) if isinstance(row, np.ndarray)]
+    if good:
+        rows = cut(np.stack([results[k] for k in good]), settings.dim)
+        for k, row, finite in zip(good, rows.astype("<f2"), np.isfinite(rows).all(axis=1), strict=True):
+            results[k] = row.tobytes() if finite else ValueError("the model gave a vector that is not finite")
+    vectors = [(items[k][0], row) for k, row in enumerate(results) if isinstance(row, bytes)]
+    failed = [
+        (items[k][0], str(row) or type(row).__name__) for k, row in enumerate(results) if isinstance(row, BaseException)
+    ]
     if failed:
         FAILURES.add(len(failed))
         log.info("embed.input.failed", extra={"failed": len(failed)})
-    return vectors, list(failed.items())
+    return vectors, failed

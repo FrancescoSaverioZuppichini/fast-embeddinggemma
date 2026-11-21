@@ -17,5 +17,5 @@ RUN uv sync --locked --no-dev --extra server --no-cache
 # [Agent] Weights and compiled kernels go to /cache: mount a volume there so a restart neither downloads nor recompiles.
 ENV PATH=/app/.venv/bin:$PATH HF_HOME=/cache/hf TRITON_CACHE_DIR=/cache/triton EMBED_HOST=0.0.0.0 EMBED_PORT=8100
 VOLUME /cache
-EXPOSE 8100
+EXPOSE 8100 8101
 CMD ["fast-embeddinggemma", "serve"]
