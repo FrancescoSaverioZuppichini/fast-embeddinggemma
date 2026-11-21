@@ -28,7 +28,7 @@ The package serves 140 tokens; the 280 rows come from the same engine with a 280
 |---|---|---|---|
 | 32 | 92.5 | **203-213** | 199 |
 | 8 | 80.5 | **188-199** | |
-| 1 | 36.1 | **134** | |
+| 1 | 36.1 | **142** | |
 
 **Search queries** (one query per call):
 
@@ -43,7 +43,7 @@ The package serves 140 tokens; the 280 rows come from the same engine with a 280
 
 | | HF stack | ours |
 |---|---|---|
-| cold start | 509 s (compile) | about 10 s (engine) / 15 s (service) |
+| cold start | 509 s (compile) | about 10 s (engine) / 15-21 s (service, 21 with a cold kernel cache) |
 | card memory, service | | 3.1 GB, the whole process as nvidia-smi counts it (4.5 GB without expandable segments) |
 | search R@10 against fp32 | -0.44 points | INT8 -1.54 points, bf16 -0.69 points |
 
