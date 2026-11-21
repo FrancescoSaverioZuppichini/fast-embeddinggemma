@@ -54,8 +54,8 @@ def prep_qkv(qkv, cs, w, hq, hkv, half):
 
 
 def attend(qkv, L, hq, hkv, hd, mask=None):
-    """Prepared q|k|v rows (N, (hq + 2 hkv) hd) -> attention output (N, hq hd): bidirectional, scale 1.0; mask (N // L, L) bool,
-    True = a real key (padded search queries), None = no padding (pictures)."""
+    """Prepared q|k|v rows (N, (hq + 2 hkv) hd) -> attention output (N, hq hd): bidirectional, scale 1.0. mask: None (no padding),
+    (B, L) bool = the real keys of padded queries, or (B, L, L) bool = which key each query may see (a sliding window)."""
     N = qkv.shape[0]
     q, k, v = (t.view(N // L, L, -1, hd).transpose(1, 2) for t in qkv.split((hq * hd, hkv * hd, hkv * hd), -1))
     # [Agent] Unmasked, SDPA shares the key heads itself (bit-identical to repeating them, 0.34 ms faster per batch at head 512).
@@ -63,7 +63,7 @@ def attend(qkv, L, hq, hkv, hd, mask=None):
     gqa = hq != hkv and mask is None
     if hq != hkv and not gqa:
         k, v = k.repeat_interleave(hq // hkv, 1), v.repeat_interleave(hq // hkv, 1)
-    keys = None if mask is None else mask[:, None, None, :]
+    keys = None if mask is None else mask[:, None, None, :] if mask.dim() == 2 else mask[:, None]
     return (
         F.scaled_dot_product_attention(q, k, v, attn_mask=keys, scale=1.0, enable_gqa=gqa)
         .transpose(1, 2)

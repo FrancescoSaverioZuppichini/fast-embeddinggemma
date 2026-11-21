@@ -1,6 +1,7 @@
 """Search queries -> vectors through the engine's own text tower: the query prompt, the tokenizer, padding to a length bucket,
 the embedding rows (kept in host memory: the table never goes on the card), the masked tower, the mean over real tokens. One
-recorded CUDA graph per (bucket, queries), captured into the engine's memory pool. Queries over 512 tokens are cut at 512."""
+recorded CUDA graph per (bucket, queries), captured into the engine's memory pool. A query over 512 tokens runs eager at its
+exact length, with the sliding-window mask; past 8,192 tokens it is cut, as the stock sidecar did."""
 
 import torch
 import torch.nn.functional as F
@@ -16,6 +17,7 @@ PROMPT = "task: search result | query: "
 BUCKETS = (16, 32, 64, 128, 256, 512)
 SIZES = (8, 4, 2, 1)  # queries per graph, largest first
 ROWS = 1024  # most tokens one graph holds: a graph's memory grows with its rows (822 MiB at 4,096)
+LIMIT = 8192  # tokens; the stock sidecar's cut
 
 
 def sizes_for(L):
@@ -30,10 +32,10 @@ def run_query(emb, mask, T):
 
 @torch.inference_mode()
 def load(E, checkpoint=None):
-    """The tokenizer (cutting at 512 tokens), the embedding table in host memory, the RoPE of every bucket, the graphs."""
+    """The tokenizer (cutting at LIMIT tokens), the embedding table in host memory, the RoPE of every bucket, the graphs."""
     T, dev, dtype = E["T"], E["T"]["norm"].device, E["T"]["out"].dtype
     tokenizer = Tokenizer.from_file(hf_hub_download(weights.REPO, "tokenizer.json"))
-    tokenizer.enable_truncation(max(BUCKETS))
+    tokenizer.enable_truncation(LIMIT)
     table = weights.open_file(checkpoint).get_tensor("language_model.embed_tokens.weight")
     T["rope"].update({L: make_rope(L, dev, dtype) for L in BUCKETS})
     graphs = {}
@@ -47,7 +49,9 @@ def load(E, checkpoint=None):
             if not torch.allclose(out.norm(dim=-1), torch.ones(B, device=dev), atol=1e-3):
                 raise RuntimeError(f"query graph {L} x {B}: the replay is not unit vectors")
             graphs[L, B] = emb, mask, graph, out
-    return dict(tokenizer=tokenizer, table=table, scale=torch.tensor(TEXT["dim"] ** 0.5, dtype=dtype), graphs=graphs)
+    return dict(
+        T=T, tokenizer=tokenizer, table=table, scale=torch.tensor(TEXT["dim"] ** 0.5, dtype=dtype), graphs=graphs
+    )
 
 
 def run_group(Q, ids, mask):
@@ -61,13 +65,26 @@ def run_group(Q, ids, mask):
     return out.clone()
 
 
+def run_long(Q, seq):
+    """One query over 512 tokens -> (768,) vector: eager at its exact length (no padding), RoPE built for that length."""
+    T = Q["T"]
+    dev, dtype = T["norm"].device, T["out"].dtype
+    emb = (Q["table"][torch.tensor(seq)] * Q["scale"]).to(dev)[None]
+    T["rope"].setdefault(len(seq), make_rope(len(seq), dev, dtype))
+    return run_query(emb, torch.ones(1, len(seq), dtype=torch.bool, device=dev), T)[0]
+
+
 @torch.inference_mode()
 def embed(Q, texts):
     """Texts -> (n, 768) float32 unit vectors in input order; queries of one bucket share a graph."""
     seqs = [e.ids for e in Q["tokenizer"].encode_batch([PROMPT + t for t in texts])]
     out, groups = torch.empty(len(texts), TEXT["out"], device=Q["graphs"][16, 1][3].device), {}
     for i, s in enumerate(seqs):
-        groups.setdefault(next(L for L in BUCKETS if L >= len(s)), []).append(i)
+        L = next((b for b in BUCKETS if b >= len(s)), None)
+        if L is None:
+            out[i] = run_long(Q, s)
+        else:
+            groups.setdefault(L, []).append(i)
     for L, rows in groups.items():
         at = 0
         while at < len(rows):

@@ -51,12 +51,19 @@ def run_tower(x, T, mask=None):
     """Embedded tokens (B, L, 512) -> the 768-d vector of every token (B, L, 768), before the mean; mask (B, L) bool = real keys."""
     B, L, D = x.shape
     x = x.reshape(B * L, D)
+    band = None
+    if L > CFG["window"]:
+        # [Agent] Past 512 tokens the sliding layers see a key only within 512 positions (HF: |q - kv| <= 512, real keys only).
+        i = torch.arange(L, device=x.device)
+        real = mask if mask is not None else torch.ones(B, L, dtype=torch.bool, device=x.device)
+        band = real[:, None, :] & ((i[:, None] - i[None, :]).abs() <= CFG["window"])
     # [Agent] PLE: one projection of the input to 24 x 512, scaled by 512^-0.5 and normed per layer; layer i reads slice i.
     ple = rms_norm((F.linear(x, T["ple"]) * D**-0.5).view(-1, CFG["layers"], D), T["ple_norm"])
     h, x, lws = x, rms_norm(x, T["layers"][0]["w_in"]), T["layers"]
     for i, lw in enumerate(lws):
         w_next = lws[i + 1]["w_in"] if i + 1 < len(lws) else T["norm"]
-        h, x = run_text_layer(h, x, lw, ple[:, i], T["rope"][L], w_next, mask)
+        layer_mask = band if band is not None and i not in CFG["full_layers"] else mask
+        h, x = run_text_layer(h, x, lw, ple[:, i], T["rope"][L], w_next, layer_mask)
     return F.linear(x, T["out"]).view(B, L, -1)
 
 
