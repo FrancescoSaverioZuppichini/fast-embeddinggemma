@@ -6,7 +6,17 @@ PyTorch + Triton engine with a FastAPI + gRPC service on top. INT8 by default, 1
 
 ## Numbers
 
-All measured on one RTX 3090 held at 300 W. "HF stack" is the Hugging Face model under `torch.compile` (max-autotune) with
+Every number below comes from this one machine:
+
+| | |
+|---|---|
+| GPU | NVIDIA GeForce RTX 3090, 24 GB, power limit 300 W (stock 350 W) |
+| CPU | AMD Ryzen 9 5950X, 16 cores / 32 threads |
+| RAM | 64 GB DDR4-3200 |
+| OS | Ubuntu 22.04.5, Linux 6.8 |
+| Software | NVIDIA driver 595.99, CUDA 13.2, torch 2.14.0 (cu130 wheels), Triton 3.8.0, Python 3.12 |
+
+"HF stack" is the Hugging Face model under `torch.compile` (max-autotune) with
 SageAttention: the sidecar this package replaced.
 
 **The model alone** (pictures a second, files already in memory):
