@@ -44,7 +44,7 @@ The package serves 140 tokens; the 280 rows come from the same engine with a 280
 | | HF stack | ours |
 |---|---|---|
 | cold start | 509 s (compile) | about 10 s (engine) / 15 s (service) |
-| card memory, service | | about 2.8 GB |
+| card memory, service | | 3.1 GB, the whole process as nvidia-smi counts it (4.5 GB without expandable segments) |
 | search R@10 against fp32 | -0.44 points | INT8 -1.54 points, bf16 -0.69 points |
 
 R@10 is measured on a frozen set of 2,200 pictures and 50 judged text queries, so it moves by about a point either way.
@@ -173,6 +173,8 @@ over `EMBED_MAX_UPLOAD_MB` fails alone, and a message is capped at one full batc
 - More than `EMBED_MAX_QUEUED` pictures in flight (decoding or waiting), or free card memory under
   `EMBED_MIN_FREE_MB` (search queries are exempt), answers 503 or `RESOURCE_EXHAUSTED`.
 - Shutdown finishes the pictures already admitted; a request whose caller gave up is dropped before the card runs it.
+- `serve` sets `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` unless you set it: 3.1 GB of card memory instead
+  of 4.5, at the same speed.
 - The queue only holds work in flight. Durable queueing belongs to the caller: stash keeps it in its database.
 - Paths are read only under `EMBED_PATH_ROOTS`, checked on the resolved path that is then opened. Unset, no path is
   read: send bytes.
