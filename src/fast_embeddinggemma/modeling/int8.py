@@ -62,20 +62,23 @@ def _add_quant(
     tl.store(f + m[:, None] * NG + g[None, :], s * rs[:, None], (m[:, None] < R) & (g[None, :] < NG))
 
 
-def add_quant(r, o, w_post, w_next, group):
-    """r + post-norm(o) (o may be None), and INT8 rows + factors of its next pre-norm: (R, 1) per row, (R, D/64) per group."""
-    (R, D), c = r.shape, TILES["rows"]
+def add_quant(
+    h: torch.Tensor, branch: torch.Tensor | None, w_post: torch.Tensor | None, w_next: torch.Tensor, grouped: bool
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """h + post-norm(branch) (branch may be None), and INT8 rows + factors of its next pre-norm: (R, 1) per row, (R, D/64)
+    per group."""
+    (R, D), c = h.shape, TILES["rows"]
     DP = triton.next_power_of_2(D)
-    G, ng = (64, D // 64) if group else (DP, 1)
+    G, ng = (64, D // 64) if grouped else (DP, 1)
     ro, q, f = (
-        torch.empty_like(r),
-        torch.empty(R, D, dtype=torch.int8, device=r.device),
-        torch.empty(R, ng, device=r.device),
+        torch.empty_like(h),
+        torch.empty(R, D, dtype=torch.int8, device=h.device),
+        torch.empty(R, ng, device=h.device),
     )
-    # [Agent] With no branch (o None) the kernel never reads o or wp: r and w_next only fill their pointer slots.
-    o_slot, wp_slot = r if o is None else o, w_next if w_post is None else w_post
+    # [Agent] With no branch the kernel never reads it or w_post: h and w_next only fill their pointer slots.
+    o_slot, wp_slot = h if branch is None else branch, w_next if w_post is None else w_post
     _add_quant[(triton.cdiv(R, c["BM"]),)](
-        o_slot, r, wp_slot, w_next, ro, q, f, R, D=D, DP=DP, HAS_O=o is not None, EPS=EPS, G=G, NG=ng, **c
+        o_slot, h, wp_slot, w_next, ro, q, f, R, D=D, DP=DP, HAS_O=branch is not None, EPS=EPS, G=G, NG=ng, **c
     )
     return ro, q, f
 
@@ -90,7 +93,7 @@ def _quant_rows(x, q, f, R, D: tl.constexpr, DP: tl.constexpr, BM: tl.constexpr,
     tl.store(f + m[:, None] * NG + g[None, :], s, (m[:, None] < R) & (g[None, :] < NG))
 
 
-def quant_rows(x):
+def quant_rows(x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
     """bf16 rows (the attention output) -> INT8 rows + one scale per 64 columns."""
     (R, D), c = x.shape, TILES["rows"]
     q, f = torch.empty(R, D, dtype=torch.int8, device=x.device), torch.empty(R, D // 64, device=x.device)
@@ -117,7 +120,9 @@ def _gate_up(a, f, w, sw, wu, su, c, gs, R, N, D, BM: tl.constexpr, BN: tl.const
     tl.store(c + m[:, None] * N + n[None, :], yq, (m < R)[:, None])
 
 
-def gate_up(q, f, w, sw, wu, su):
+def gate_up(
+    q: torch.Tensor, f: torch.Tensor, w: torch.Tensor, sw: torch.Tensor, wu: torch.Tensor, su: torch.Tensor
+) -> tuple[torch.Tensor, torch.Tensor]:
     """INT8 rows + row factor x INT8 gate and up -> gelu(gate) * up as INT8 (R, N) + one scale per (row, 64 columns)."""
     (R, D), N, c = q.shape, w.shape[0], TILES["gate_up"]
     assert D % c["BK"] == 0 and N % c["BN"] == 0
@@ -139,7 +144,7 @@ def _gemm_groups(a, s, w, sw, c, R, N, D: tl.constexpr, BM: tl.constexpr, BN: tl
     tl.store(c + m[:, None] * N + n[None, :], (acc * tl.load(sw + n)[None, :]).to(c.dtype.element_ty), (m < R)[:, None])
 
 
-def gemm_groups(q, s, w, sw):
+def gemm_groups(q: torch.Tensor, s: torch.Tensor, w: torch.Tensor, sw: torch.Tensor) -> torch.Tensor:
     """INT8 input with one scale per (row, 64 columns) x INT8 weight (N, D) with channel scales -> bf16 (R, N)."""
     (R, D), N, c = q.shape, w.shape[0], TILES["groups"]
     y = torch.empty(R, N, dtype=torch.bfloat16, device=q.device)
@@ -196,7 +201,7 @@ def _qkv_rope(
         t = (m % L)[:, None] * 64 + (j + (j & 16))[None, :]
         cos_a, sin_a = tl.load(cs + t).to(tl.float32), tl.load(cs + L * 64 + t).to(tl.float32)
         cos_b, sin_b = tl.load(cs + t + 16).to(tl.float32), tl.load(cs + L * 64 + t + 16).to(tl.float32)
-        # [Agent] Eager rounds each product and the sum to bf16 (as prep_qkv does): kept.
+        # [Agent] Eager rounds each product and the sum to bf16 (as attention.qkv_rope does): kept.
         ya, yb = (
             round_to(round_to(ya * cos_a, True) - round_to(yb * sin_a, True), True),
             round_to(round_to(yb * cos_b, True) + round_to(ya * sin_b, True), True),
@@ -205,7 +210,7 @@ def _qkv_rope(
     tl.store(out + m[:, None] * (3 * H * 64) + ca[None, :] + 16, yb.to(tl.bfloat16), ok)
 
 
-def qkv_rope(q, f, s, cs):
+def qkv_rope(q: torch.Tensor, f: torch.Tensor, s: tuple[torch.Tensor, ...], cs: torch.Tensor) -> torch.Tensor:
     """INT8 rows (R, D) + group factors (R, D/64) -> bf16 q|k|v (R, 3 H 64), q/k normed and turned; s = split_heads(weight)."""
     (R, D), H, c = q.shape, q.shape[1] // 64, TILES["qkv"]
     out = torch.empty(R, 3 * H * 64, dtype=torch.bfloat16, device=q.device)
@@ -213,7 +218,7 @@ def qkv_rope(q, f, s, cs):
     return out
 
 
-def split_heads(w8, sw, qk):
+def split_heads(w8: torch.Tensor, sw: torch.Tensor, qk: torch.Tensor) -> tuple[torch.Tensor, ...]:
     """INT8 q|k|v weight + channel scales + norm rows (q, k, ones) -> the A rows, B (partner) rows, scales and norms."""
     j = torch.arange(32, device=w8.device)
     rows = (torch.arange(w8.shape[0] // 64, device=w8.device)[:, None] * 64 + j + (j & 16)).flatten()
@@ -223,12 +228,13 @@ def split_heads(w8, sw, qk):
     )
 
 
-def quantize_weight(w):  # (N, K) -> INT8 (N, K), fp32 channel scale (N,)
+def quantize_weight(w: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    """(N, K) -> INT8 (N, K) and the fp32 scale of each row (N,)."""
     s = (w.float().abs().amax(1) / 127.0).clamp_min(1e-8)
     return (w.float() / s[:, None] + 0.5).floor().clamp(-127, 127).to(torch.int8).contiguous(), s.contiguous()
 
 
-def quantize(W):
+def quantize(W: dict) -> dict:
     """Vision weights with INT8 products (replacing the bf16 ones); patch, position and embedder weights stay bf16."""
 
     def layer(lw):
@@ -243,14 +249,20 @@ def quantize(W):
     return W | dict(layers=[layer(lw) for lw in W["layers"]])
 
 
-def run_layer(h, x, lw, w_next, cs):
+def run_layer(
+    h: torch.Tensor, x: tuple[torch.Tensor, torch.Tensor], lw: dict, w_next: torch.Tensor | None, cs: torch.Tensor
+) -> tuple[torch.Tensor, tuple[torch.Tensor, torch.Tensor]]:
     """vision.run_layer with INT8 products; x = (INT8 rows, 64-value group factors) of the pre-norm input of the QKV product."""
     H = h.shape[1] // 64
     a = attend(qkv_rope(*x, lw["qkv"], cs), cs.shape[1], H, H, 64)
     # [Agent] The MLP input gets one scale per row (group False): its product is the fused gate|up kernel.
-    h, q, f = add_quant(h, gemm_groups(*quant_rows(a), *lw["wo"]), lw["w_pa"], lw["w_pre"], False)
+    h, q, f = add_quant(h, gemm_groups(*quant_rows(a), *lw["wo"]), lw["w_pa"], lw["w_pre"], grouped=False)
     # [Agent] The last layer has no next pre-norm; its INT8 rows are never read, so any norm scale fills the slot.
     h, q, f = add_quant(
-        h, gemm_groups(*gate_up(q, f, *lw["gu"]), *lw["wd"]), lw["w_pf"], lw["w_pf"] if w_next is None else w_next, True
+        h,
+        gemm_groups(*gate_up(q, f, *lw["gu"]), *lw["wd"]),
+        lw["w_pf"],
+        lw["w_pf"] if w_next is None else w_next,
+        grouped=True,
     )
     return h, (q, f)

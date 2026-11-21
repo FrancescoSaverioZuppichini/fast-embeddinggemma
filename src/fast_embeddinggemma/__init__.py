@@ -1,58 +1,52 @@
 """Fast EmbeddingGemma 2 embeddings: pictures and search queries into one 768-d space, on an NVIDIA card."""
 
-import os
+from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor
 from importlib.metadata import version
 
 import numpy as np
 
-from .modeling import canvases, embed, load, queries
-from .preprocessing import process
+from .modeling import CANVASES, Engine, embed, load, queries
+from .preprocessing import Picture, process
 
 __version__ = version("fast-embeddinggemma")
-__all__ = ["canvases", "embed", "embed_images", "embed_texts", "load", "process"]
+__all__ = ["CANVASES", "Engine", "Picture", "embed", "embed_images", "embed_texts", "load", "process"]
 
 # [Agent] Pictures prepared ahead of the card: enough for full batches per canvas, few enough that RAM stays flat (~0.9 MB each).
 CHUNK = 256
 
 
-def cut(vectors, dim):
+def cut(vectors: np.ndarray, dim: int) -> np.ndarray:
     """Matryoshka: the first dim values, back to unit length (the model is trained for 768, 512, 256 and 128)."""
     if dim == vectors.shape[1]:
-        return vectors  # already unit length: the engine output, untouched
+        return vectors
     v = vectors[:, :dim]
     return v / np.linalg.norm(v, axis=1, keepdims=True)
 
 
-def read(i, image):
-    try:
-        return process(image)
-    except Exception as error:
-        name = image if isinstance(image, str | os.PathLike) else type(image).__name__
-        raise ValueError(f"picture {i} ({name}) could not be read: {error}") from error
-
-
-def embed_images(model, images, dim=768, threads=8):
-    """Pictures (paths, bytes, PIL images, uint8 RGB arrays) -> (n, dim) float32 unit vectors, in input order."""
-    images, out = list(images), np.empty((len(images), 768), np.float32)
+def embed_images(model: Engine, images: Iterable[Picture], dim: int = 768, threads: int = 8) -> np.ndarray:
+    """Pictures (paths, bytes, PIL images, uint8 RGB arrays) -> (n, dim) float32 unit vectors, in input order. A picture that
+    cannot be read raises ValueError naming its position."""
+    images = list(images)
+    out = np.empty((len(images), 768), np.float32)
     with ThreadPoolExecutor(threads) as pool:
-
-        def submit(k):
-            return [pool.submit(read, i, images[i]) for i in range(k, min(k + CHUNK, len(images)))]
-
         # [Agent] The next chunk is prepared on the CPU threads while the card embeds this one.
-        ahead = submit(0)
+        ahead = [pool.submit(process, x) for x in images[:CHUNK]]
         for k in range(0, len(images), CHUNK):
-            pictures, ahead = [f.result() for f in ahead], submit(k + CHUNK)
+            done, ahead = ahead, [pool.submit(process, x) for x in images[k + CHUNK : k + 2 * CHUNK]]
             groups = {}
-            for i, (grid, patches) in enumerate(pictures, k):
+            for i, future in enumerate(done, k):
+                try:
+                    grid, patches = future.result()
+                except Exception as error:
+                    raise ValueError(f"picture {i} could not be read: {error}") from error
                 groups.setdefault(grid, []).append((i, patches[None]))
             for grid, rows in groups.items():
                 out[[i for i, _ in rows]] = embed(model, grid, [p for _, p in rows]).cpu().numpy()
     return cut(out, dim)
 
 
-def embed_texts(model, texts, dim=768):
+def embed_texts(model: Engine, texts: Iterable[str], dim: int = 768) -> np.ndarray:
     """Search queries -> (n, dim) float32 unit vectors in the pictures' space. The query graphs are built on the first call."""
     if "queries" not in model:
         model["queries"] = queries.load(model)

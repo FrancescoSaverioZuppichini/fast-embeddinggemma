@@ -9,7 +9,7 @@ from .norm import EPS, round_to
 
 
 @triton.jit
-def _prep_qkv(
+def _qkv_rope(
     qkv,
     cs,
     w,
@@ -43,29 +43,28 @@ def _prep_qkv(
     tl.store(out + at + c[None, :], y.to(out.dtype.element_ty), ok)
 
 
-def prep_qkv(qkv, cs, w, hq, hkv, half):
+def qkv_rope(qkv: torch.Tensor, cs: torch.Tensor, w: torch.Tensor, hq: int, hkv: int, half: int) -> torch.Tensor:
     """q|k|v projections (N, (hq + 2 hkv) head) -> per-head RMSNorm (w rows: q, k, ones for v), RoPE on q and k."""
     N, L, hd = qkv.shape[0], cs.shape[1], cs.shape[2]
     out, bt = torch.empty_like(qkv), 1024 // hd
-    _prep_qkv[(triton.cdiv(N, bt), hq + 2 * hkv)](
+    _qkv_rope[(triton.cdiv(N, bt), hq + 2 * hkv)](
         qkv, cs, w, out, N, L, HQ=hq, HKV=hkv, HEAD=hd, HALF=half, BT=bt, BF=qkv.dtype == torch.bfloat16, EPS=EPS
     )
     return out
 
 
-def attend(qkv, L, hq, hkv, hd, mask=None):
+def attend(qkv: torch.Tensor, L: int, hq: int, hkv: int, hd: int, mask: torch.Tensor | None = None) -> torch.Tensor:
     """Prepared q|k|v rows (N, (hq + 2 hkv) hd) -> attention output (N, hq hd): bidirectional, scale 1.0. mask: None (no padding),
     (B, L) bool = the real keys of padded queries, or (B, L, L) bool = which key each query may see (a sliding window)."""
     N = qkv.shape[0]
     q, k, v = (t.view(N // L, L, -1, hd).transpose(1, 2) for t in qkv.split((hq * hd, hkv * hd, hkv * hd), -1))
     # [Agent] Unmasked, SDPA shares the key heads itself (bit-identical to repeating them, 0.34 ms faster per batch at head 512).
     # With a key mask k/v are repeated, as HF does: that is the path the query vectors were checked against.
-    gqa = hq != hkv and mask is None
-    if hq != hkv and not gqa:
+    if hq != hkv and mask is not None:
         k, v = k.repeat_interleave(hq // hkv, 1), v.repeat_interleave(hq // hkv, 1)
     keys = None if mask is None else mask[:, None, None, :] if mask.dim() == 2 else mask[:, None]
     return (
-        F.scaled_dot_product_attention(q, k, v, attn_mask=keys, scale=1.0, enable_gqa=gqa)
+        F.scaled_dot_product_attention(q, k, v, attn_mask=keys, scale=1.0, enable_gqa=hq != hkv and mask is None)
         .transpose(1, 2)
         .reshape(N, hq * hd)
     )

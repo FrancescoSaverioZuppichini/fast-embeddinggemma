@@ -1,0 +1,52 @@
+// The gRPC contract of fast-embeddinggemma. Vectors are `dims` little-endian float16 values, unit length.
+syntax = "proto3";
+
+package fast_embeddinggemma;
+
+service Embedder {
+  rpc Embed(EmbedRequest) returns (EmbedResponse);
+  rpc Health(HealthRequest) returns (HealthResponse);
+}
+
+message Input {
+  string id = 1;
+  oneof source {
+    bytes data = 2;   // the picture file's bytes
+    string path = 3;  // a picture file on the server's disk (EMBED_PATH_ROOTS)
+    string text = 4;  // a search query
+  }
+}
+
+message EmbedRequest {
+  string model = 1;
+  repeated Input inputs = 2;
+  bool query = 3;
+}
+
+message Vector {
+  string id = 1;
+  bytes vec = 2;
+}
+
+message Failure {
+  string id = 1;
+  string error = 2;
+}
+
+message EmbedResponse {
+  string model = 1;
+  int32 dims = 2;
+  repeated Vector vectors = 3;
+  repeated Failure failed = 4;
+}
+
+message HealthRequest {}
+
+message HealthResponse {
+  string model = 1;
+  int32 dims = 2;
+  int64 free_vram_mb = 3;
+  int32 queued_images = 4;
+  int32 queued_texts = 5;
+  string vram = 6;
+}

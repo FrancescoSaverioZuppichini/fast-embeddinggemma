@@ -21,7 +21,7 @@ def configs():
         p = dict(qkv=dt, cs=dt, w=F32, out=dt, N="i32", L="i32")
         for hq, hkv, hd in ((12, 12, 64), (4, 2, 256), (4, 1, 512)):
             half = hd // 4 if hq == hkv else hd // 2
-            yield attention._prep_qkv, p, dict(HQ=hq, HKV=hkv, HEAD=hd, HALF=half, BT=1024 // hd, BF=bf, EPS=EPS), {}
+            yield attention._qkv_rope, p, dict(HQ=hq, HKV=hkv, HEAD=hd, HALF=half, BT=1024 // hd, BF=bf, EPS=EPS), {}
         for d, nxt, scale in (
             (768, True, False),
             (768, False, False),

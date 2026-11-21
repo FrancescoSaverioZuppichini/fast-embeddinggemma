@@ -19,7 +19,7 @@ def _gelu_up(gp, up, out, GS, US, FF: tl.constexpr, BLOCK: tl.constexpr, BF: tl.
     tl.store(out + row * FF + c, round_to(act * u, BF).to(out.dtype.element_ty), c < FF)
 
 
-def gelu_up(g, u):
+def gelu_up(g: torch.Tensor, u: torch.Tensor) -> torch.Tensor:
     """gelu_tanh(g) * u for two (N, FF) row-strided views (the halves of a merged gate|up product, or a PLE gate and slice)."""
     N, FF = g.shape
     out = torch.empty(N, FF, dtype=g.dtype, device=g.device)

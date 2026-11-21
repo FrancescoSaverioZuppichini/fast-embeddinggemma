@@ -8,7 +8,7 @@ import triton.language as tl
 EPS = 1e-6  # rms_norm_eps of both towers
 
 
-def rms_norm(x, w=None):
+def rms_norm(x: torch.Tensor, w: torch.Tensor | None = None) -> torch.Tensor:
     """HF RMSNorm: statistics in fp32, optional fp32 scale, result in the input dtype."""
     xf = x.float()
     y = xf * torch.pow(xf.pow(2).mean(-1, keepdim=True) + EPS, -0.5)
@@ -54,7 +54,13 @@ def _add_norm(
         tl.store(x + at, round_to(hn * inv * tl.load(wn + c, ok, 0.0), BF).to(x.dtype.element_ty), ok)
 
 
-def add_norm(h, branch, w_post, w_next, scale=None):
+def add_norm(
+    h: torch.Tensor,
+    branch: torch.Tensor,
+    w_post: torch.Tensor,
+    w_next: torch.Tensor | None,
+    scale: torch.Tensor | None = None,
+) -> tuple[torch.Tensor, torch.Tensor | None]:
     """h + post-norm(branch) (times scale), and the next sublayer's pre-norm of it (None when no norm follows)."""
     ho, D, nxt = torch.empty_like(h), h.shape[1], w_next is not None
     # [Agent] With NEXT / SCALE off, x, wn and sc are never read or written; ho and w_post only fill their pointer slots.
