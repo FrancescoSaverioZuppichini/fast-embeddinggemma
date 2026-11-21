@@ -19,7 +19,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-server = ["fastapi>=0.162", "pydantic>=2.14", "transformers==5.22.2", "uvicorn>=0.54"]
+text = ["transformers==5.22.2"]
+server = ["fast-embeddinggemma[text]", "fastapi>=0.162", "pydantic>=2.14", "uvicorn>=0.54"]
 
 [project.scripts]
 fast-embeddinggemma = "fast_embeddinggemma.cli:main"

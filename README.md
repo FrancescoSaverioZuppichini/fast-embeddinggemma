@@ -34,6 +34,7 @@ versions the vectors were measured on.
 
 ```bash
 uv add git+https://github.com/FrancescoSaverioZuppichini/fast-embeddinggemma            # the engine
+uv add "fast-embeddinggemma[text] @ git+https://github.com/FrancescoSaverioZuppichini/fast-embeddinggemma"    # + search queries
 uv add "fast-embeddinggemma[server] @ git+https://github.com/FrancescoSaverioZuppichini/fast-embeddinggemma"  # + HTTP service
 ```
 
@@ -50,34 +51,38 @@ url = "https://download.pytorch.org/whl/cu130"
 explicit = true
 ```
 
-The engine reads the weights from the local Hugging Face cache and never downloads them. Accept the Gemma terms on the
-model page first, then run `hf download google/embeddinggemma-2`.
+The weights download into the Hugging Face cache on first use. They're gated: accept the Gemma terms on the
+[model page](https://huggingface.co/google/embeddinggemma-2) and log in once with `hf auth login`. With
+`HF_HUB_OFFLINE=1` it never touches the network.
 
 ## Use
 
 ```python
 import fast_embeddinggemma as feg
 
-engine = feg.load()  # INT8; feg.load(precision="bf16") for vectors closer to the reference
-vectors = feg.embed_images(engine, ["a.jpg", "b.webp", open("c.png", "rb").read()])
-print(vectors.shape)  # (3, 768) float32, unit length: cosine similarity is a dot product
+model = feg.load()  # INT8, ~10 s; feg.load(precision="bf16") for vectors closer to the reference
+images = feg.embed_images(model, ["cat.jpg", png_bytes, pil_image, rgb_array])  # (4, 768) float32, unit length
+query = feg.embed_texts(model, ["a cat on a sofa"])  # (1, 768), same space ([text] extra)
+scores = query @ images.T  # cosine similarity
 
-# one level down: prepare a picture, then embed many of one canvas in one call (vectors stay on the card)
-grid, patches = feg.read("a.jpg")  # (rows, cols), uint8 (9 * rows * cols, 768)
-on_card = feg.embed(engine, grid, patches[None])  # (1, 768)
+# one level down: prepare one picture, then embed many of one canvas in one call (vectors stay on the card)
+grid, patches = feg.process("cat.jpg")  # (rows, cols), uint8 (9 * rows * cols, 768)
+on_card = feg.embed(model, grid, patches[None])  # (1, 768)
 ```
 
-- `load(device="cuda", precision="int8", checkpoint=None)` loads the weights and builds 84 CUDA graphs (7 canvases x 12 batch sizes). `checkpoint` is an HF-layout safetensors file and defaults to the cache.
-- `embed(engine, grid, pieces)` takes uint8 patches of one canvas, as one tensor or a list of tensors. They can live in pinned memory or on the card, and they're copied straight into the graph's input. Any batch size works: each call takes at most two graph replays up to 32 pictures. Call it from one thread only.
-- `embed_images(engine, paths_or_bytes)` prepares the pictures, groups them by canvas and returns vectors in input order.
-- `read(path_or_bytes)` prepares a picture exactly the way the stock sidecar's decode feeds the model: Pillow draft + EXIF turn + Lanczos thumbnail to 1,135 px, then torchvision's uint8 bicubic antialias squash onto the nearest canvas.
+- `load(device="cuda", precision="int8", checkpoint=None)` loads the weights and builds 84 CUDA graphs (7 canvases x 12 batch sizes). `checkpoint` is an HF-layout safetensors file; by default the hub checkpoint.
+- `embed_images(model, images, dim=768, threads=8)` takes paths, bytes, PIL images or uint8 RGB arrays, any number of them. They're prepared 256 at a time on CPU threads while the card works, grouped by canvas, and the vectors come back in input order. A picture that can't be read raises an error naming its index. `dim` of 512, 256 or 128 cuts the vector and makes it unit length again.
+- `embed_texts(model, texts, dim=768)` embeds search queries, with the query prompt added. The text model loads on the first call (needs the `[text]` extra).
+- `process(image)` prepares one picture exactly the way the stock sidecar's decode feeds the model: Pillow (with the JPEG draft scale-down for files and bytes) + EXIF turn + Lanczos thumbnail to 1,135 px, then torchvision's uint8 bicubic antialias squash onto the nearest canvas. A path, bytes, a PIL image and an array of the same picture give the same patches.
+- `embed(model, grid, pieces)` takes uint8 patches of one canvas, as one tensor or a list of tensors, in pinned memory or on the card, copied straight into the graph's input. Any batch size works: up to 32 pictures take at most two graph replays. Call it from one thread only.
 - `canvases()` returns the 7 grids, as (rows, cols).
 
 ## CLI
 
 ```bash
-fast-embeddinggemma bench ./pictures              # model-only img/s at 1, 8 and 32 pictures per call
-fast-embeddinggemma serve --port 8100             # the HTTP service (needs the [server] extra)
+fast-embeddinggemma embed ./photos --out vectors.npy  # every picture under the folder; the paths go to vectors.txt
+fast-embeddinggemma bench ./pictures                  # model-only img/s at 1, 8 and 32 pictures per call
+fast-embeddinggemma serve --port 8100                 # the HTTP service (needs the [server] extra)
 ```
 
 ## HTTP service
@@ -105,6 +110,27 @@ How it handles work:
 
 - 140 soft tokens only. The 7 canvases cover about 96% of pictures with the grid the stock processor would have picked.
 - The INT8 tile sizes were tuned on an RTX 3090 (sm_86). Other cards run, but may want other tiles.
+
+## Code
+
+```
+src/fast_embeddinggemma/
+  __init__.py        load, embed_images, embed_texts, process, embed, canvases
+  preprocessing.py   any picture -> canvas + uint8 patches (CPU)
+  server.py          the HTTP service
+  cli.py, bench.py   fast-embeddinggemma embed | bench | serve
+  modeling/          the network
+    canvas.py        the 7 canvases, which one a picture goes on, their position and RoPE tables
+    weights.py       reading the checkpoint, one layer reader for both towers
+    norm.py          RMS norm, the fused add + norm kernel, bf16 rounding
+    attention.py     the fused q/k norm + RoPE kernel, attention
+    mlp.py           the fused GELU x up kernel
+    int8.py          INT8 mode: weight quantization, its kernels, the INT8 vision layer
+    vision.py        patches -> 16 layers -> 3x3 pooling -> soft tokens
+    text.py          soft tokens -> 24-layer text tower -> the vector
+    engine.py        load (weights + CUDA graphs) and embed
+    queries.py       search queries through the Hugging Face text model
+```
 
 ## Develop
 

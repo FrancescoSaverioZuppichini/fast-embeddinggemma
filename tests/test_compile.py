@@ -5,10 +5,10 @@ import pytest
 import triton
 from triton.backends.compiler import GPUTarget
 
-from fast_embeddinggemma import int8 as I
-from fast_embeddinggemma import kernels as K
+from fast_embeddinggemma.modeling import attention, mlp, norm
+from fast_embeddinggemma.modeling import int8 as I
 
-BF, F32, I8, EPS = "*bf16", "*fp32", "*i8", K.EPS
+BF, F32, I8, EPS = "*bf16", "*fp32", "*i8", norm.EPS
 
 
 def launch(tile):
@@ -21,7 +21,7 @@ def configs():
         p = dict(qkv=dt, cs=dt, w=F32, out=dt, N="i32", L="i32")
         for hq, hkv, hd in ((12, 12, 64), (4, 2, 256), (4, 1, 512)):
             half = hd // 4 if hq == hkv else hd // 2
-            yield K._prep_qkv, p, dict(HQ=hq, HKV=hkv, HEAD=hd, HALF=half, BT=1024 // hd, BF=bf, EPS=EPS), {}
+            yield attention._prep_qkv, p, dict(HQ=hq, HKV=hkv, HEAD=hd, HALF=half, BT=1024 // hd, BF=bf, EPS=EPS), {}
         for d, nxt, scale in (
             (768, True, False),
             (768, False, False),
@@ -30,9 +30,14 @@ def configs():
             (512, True, True),
         ):
             p = dict(h=dt, br=dt, wp=F32, wn=F32, sc=dt if scale else F32, ho=dt, x=dt)
-            yield K._add_norm, p, dict(D=d, BLOCK=triton.next_power_of_2(d), NEXT=nxt, BF=bf, EPS=EPS, SCALE=scale), {}
+            yield (
+                norm._add_norm,
+                p,
+                dict(D=d, BLOCK=triton.next_power_of_2(d), NEXT=nxt, BF=bf, EPS=EPS, SCALE=scale),
+                {},
+            )
         for ff in (3072, 2048, 512):
-            yield K._gelu_up, dict(gp=dt, up=dt, out=dt, GS="i32", US="i32"), dict(FF=ff, BLOCK=1024, BF=bf), {}
+            yield mlp._gelu_up, dict(gp=dt, up=dt, out=dt, GS="i32", US="i32"), dict(FF=ff, BLOCK=1024, BF=bf), {}
     for g, ng in ((64, 12), (1024, 1)):
         for has_o in (False, True):
             p = dict(o=BF, r=BF, wp=F32, wn=F32, ro=BF, q=I8, f=F32, R="i32")

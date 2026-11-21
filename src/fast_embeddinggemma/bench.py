@@ -9,7 +9,8 @@ from pathlib import Path
 
 import torch
 
-from . import model, prep
+from . import preprocessing
+from .modeling import embed, load
 
 CFG = dict(warmups=2, timed=5)
 
@@ -19,7 +20,7 @@ def prep_folder(folder, n, threads):
     paths = sorted(p for p in Path(folder).iterdir() if p.is_file())[:n]
     t0 = time.perf_counter()
     with ThreadPoolExecutor(threads) as pool:
-        pictures = list(pool.map(prep.read, paths))
+        pictures = list(pool.map(preprocessing.process, paths))
     return pictures, time.perf_counter() - t0
 
 
@@ -35,7 +36,7 @@ def time_sweep(E, calls):
     torch.cuda.synchronize()
     t0 = time.perf_counter()
     for grid, block in calls:
-        model.embed(E, grid, block)
+        embed(E, grid, block)
     torch.cuda.synchronize()
     return time.perf_counter() - t0
 
@@ -44,7 +45,7 @@ def run(folder, precision="int8", n=256, sizes=(1, 8, 32), threads=8):
     pictures, secs = prep_folder(folder, n, threads)
     print(f"prep: {len(pictures)} pictures on {threads} threads, {len(pictures) / secs:.0f} img/s", flush=True)
     t0 = time.perf_counter()
-    E = model.load("cuda", precision)
+    E = load("cuda", precision)
     print(f"load: {time.perf_counter() - t0:.1f} s ({precision}, {len(E['graphs'])} graphs)", flush=True)
     for b in sizes:
         calls = make_calls(pictures, b)

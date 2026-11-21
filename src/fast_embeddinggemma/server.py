@@ -15,11 +15,11 @@ from contextlib import asynccontextmanager
 
 import numpy as np
 import torch
-import torch.nn.functional as F
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
-from . import __version__, model, prep
+from . import __version__, modeling, preprocessing
+from .modeling import queries
 
 ENV = os.environ.get
 CFG = {
@@ -30,7 +30,6 @@ CFG = {
     "threads": int(ENV("EMBED_DECODE_THREADS", "8")),
     "precision": ENV("EMBED_PRECISION", "int8"),
 }
-QUERY_PROMPT = "task: search result | query: "
 STATE = {}
 
 
@@ -54,35 +53,16 @@ def free_mb():
     return torch.cuda.mem_get_info()[0] >> 20
 
 
-def load_text():
-    """Tokenizer + the query encoder: only the Hugging Face language model goes to the card, the vision tower never does.
-    Eager on purpose: torch.compile made a warm query 4 ms instead of 25, but start-up 99 s instead of 22, and each new query length
-    recompiled for up to 85 s."""
-    from transformers import AutoModel, AutoTokenizer
-
-    hf = AutoModel.from_pretrained(CFG["model"], dtype=torch.bfloat16, attn_implementation="sdpa", audio_config=None)
-    lm = hf.language_model.to("cuda").eval()
-
-    def encode(ids, mask):
-        h = lm(inputs_embeds=lm.embed_tokens(ids), attention_mask=mask).last_hidden_state
-        m = mask.unsqueeze(-1).float()
-        return F.normalize((h.float() * m).sum(1) / m.sum(1), dim=-1)
-
-    return AutoTokenizer.from_pretrained(CFG["model"]), encode
-
-
 def embed_texts(texts):
     """Search queries on the GPU thread -> one vector, or the error, per text."""
     try:
-        with torch.inference_mode():
-            tok = STATE["tok"](texts, padding=True, truncation=True, max_length=8192, return_tensors="pt")
-            return list(STATE["text"](tok["input_ids"].cuda(), tok["attention_mask"].cuda()).float().cpu().numpy())
+        return list(queries.embed(STATE["queries"], texts))
     except Exception as error:  # noqa: BLE001
         return [error] * len(texts)
 
 
 def prep_picture(path):
-    grid, patches = prep.read(path)
+    grid, patches = preprocessing.process(path)
     # [Agent] Pinned here, on the prep threads, so the GPU thread's copy into the graph slot is a DMA, not a staged copy.
     return grid, patches.pin_memory()
 
@@ -113,7 +93,7 @@ def drain():
             grid, batch = take_batch()
         t0 = time.perf_counter()
         try:
-            vecs = list(model.embed(STATE["engine"], grid, [p[None] for _, p, _ in batch]).cpu().numpy())
+            vecs = list(modeling.embed(STATE["engine"], grid, [p[None] for _, p, _ in batch]).cpu().numpy())
         except Exception as error:  # noqa: BLE001
             vecs = [error] * len(batch)
         for (_, _, fut), vec in zip(batch, vecs, strict=True):
@@ -139,7 +119,7 @@ async def embed_pictures(items):
 
 
 async def embed_queries(items):
-    vecs = await asyncio.wrap_future(STATE["gpu"].submit(embed_texts, [QUERY_PROMPT + i.text for i in items]))
+    vecs = await asyncio.wrap_future(STATE["gpu"].submit(embed_texts, [i.text for i in items]))
     return dict(zip([i.id for i in items], vecs, strict=True))
 
 
@@ -169,17 +149,15 @@ async def lifespan(_):
     if ENV("EMBED_IMAGE_TOKENS", "140") != "140":
         raise ValueError("the engine's canvases are built for 140 image tokens")
     started = time.time()
-    tok, text = load_text()
     STATE.update(
-        engine=model.load("cuda", CFG["precision"]),
-        tok=tok,
-        text=text,
+        engine=modeling.load("cuda", CFG["precision"]),
+        queries=queries.load(CFG["model"]),
         lock=threading.Lock(),
-        queues={g: deque() for g in model.canvases()},
+        queues={g: deque() for g in modeling.canvases()},
         prep=ThreadPoolExecutor(CFG["threads"]),
         gpu=ThreadPoolExecutor(1),
     )
-    STATE["gpu"].submit(embed_texts, [QUERY_PROMPT + "warm up"] * 2).result()
+    STATE["gpu"].submit(embed_texts, ["warm up"] * 2).result()
     log(event="ready", load_s=round(time.time() - started, 2), cfg=CFG, version=__version__)
     yield
     STATE["prep"].shutdown(cancel_futures=True)

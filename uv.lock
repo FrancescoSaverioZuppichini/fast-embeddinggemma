@@ -147,6 +147,9 @@ server = [
     { name = "transformers" },
     { name = "uvicorn" },
 ]
+text = [
+    { name = "transformers" },
+]
 
 [package.dev-dependencies]
 dev = [
@@ -156,6 +159,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "fast-embeddinggemma", extras = ["text"], marker = "extra == 'server'" },
     { name = "fastapi", marker = "extra == 'server'", specifier = ">=0.162" },
     { name = "huggingface-hub", specifier = ">=0.30" },
     { name = "numpy", specifier = ">=2" },
@@ -164,11 +168,11 @@ requires-dist = [
     { name = "safetensors", specifier = ">=0.5" },
     { name = "torch", specifier = "==2.14.0", index = "https://download.pytorch.org/whl/cu130" },
     { name = "torchvision", specifier = "==0.29.0", index = "https://download.pytorch.org/whl/cu130" },
-    { name = "transformers", marker = "extra == 'server'", specifier = "==5.22.2" },
+    { name = "transformers", marker = "extra == 'text'", specifier = "==5.22.2" },
     { name = "triton", specifier = "==3.8.0" },
     { name = "uvicorn", marker = "extra == 'server'", specifier = ">=0.54" },
 ]
-provides-extras = ["server"]
+provides-extras = ["text", "server"]
 
 [package.metadata.requires-dev]
 dev = [

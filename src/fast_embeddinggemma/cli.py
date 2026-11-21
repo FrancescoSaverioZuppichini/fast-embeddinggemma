@@ -1,6 +1,9 @@
-"""fast-embeddinggemma serve | bench. Each subcommand imports its own module, so `bench` needs no server extra."""
+"""fast-embeddinggemma serve | bench | embed. Each subcommand imports its own module, so `bench` needs no server extra."""
 
 import argparse
+from pathlib import Path
+
+IMAGES = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".tif", ".tiff"}
 
 
 def serve(args):
@@ -13,6 +16,19 @@ def bench(args):
     from .bench import run
 
     run(args.folder, args.precision, args.n, tuple(args.sizes), args.threads)
+
+
+def embed(args):
+    import numpy as np
+
+    from . import embed_images, load
+
+    paths = sorted(p for p in Path(args.folder).rglob("*") if p.suffix.lower() in IMAGES)
+    vectors = embed_images(load(precision=args.precision), paths, dim=args.dim)
+    np.save(args.out, vectors)
+    names = Path(args.out).with_suffix(".txt")
+    names.write_text("".join(f"{p}\n" for p in paths))
+    print(f"{len(paths)} pictures -> {args.out} {vectors.shape}, paths in {names}")
 
 
 def main(argv=None):
@@ -29,5 +45,13 @@ def main(argv=None):
     p.add_argument("--sizes", type=int, nargs="+", default=[1, 8, 32], help="pictures per call")
     p.add_argument("--threads", type=int, default=8, help="CPU threads that prepare the pictures")
     p.set_defaults(run=bench)
+    p = commands.add_parser(
+        "embed", help="every picture under a folder -> vectors.npy (+ the paths, one per line, in .txt)"
+    )
+    p.add_argument("folder")
+    p.add_argument("--out", default="vectors.npy")
+    p.add_argument("--precision", default="int8", choices=("int8", "bf16"))
+    p.add_argument("--dim", type=int, default=768, choices=(768, 512, 256, 128))
+    p.set_defaults(run=embed)
     args = parser.parse_args(argv)
     args.run(args)

@@ -7,8 +7,8 @@ import triton
 import triton.language as tl
 from triton.language.extra.libdevice import tanh
 
-from . import kernels as K
-from .kernels import round_to
+from .attention import attend
+from .norm import EPS, round_to
 
 # [Agent] Tile sizes from sweeps on an RTX 3090 at 140 tokens, batch 32; other cards may want others.
 TILES = dict(
@@ -75,7 +75,7 @@ def add_quant(r, o, w_post, w_next, group):
     # [Agent] With no branch (o None) the kernel never reads o or wp: r and w_next only fill their pointer slots.
     o_slot, wp_slot = r if o is None else o, w_next if w_post is None else w_post
     _add_quant[(triton.cdiv(R, c["BM"]),)](
-        o_slot, r, wp_slot, w_next, ro, q, f, R, D=D, DP=DP, HAS_O=o is not None, EPS=K.EPS, G=G, NG=ng, **c
+        o_slot, r, wp_slot, w_next, ro, q, f, R, D=D, DP=DP, HAS_O=o is not None, EPS=EPS, G=G, NG=ng, **c
     )
     return ro, q, f
 
@@ -209,7 +209,7 @@ def qkv_rope(q, f, s, cs):
     """INT8 rows (R, D) + group factors (R, D/64) -> bf16 q|k|v (R, 3 H 64), q/k normed and turned; s = split_heads(weight)."""
     (R, D), H, c = q.shape, q.shape[1] // 64, TILES["qkv"]
     out = torch.empty(R, 3 * H * 64, dtype=torch.bfloat16, device=q.device)
-    _qkv_rope[(3 * H // c["HB"], triton.cdiv(R, c["BM"]))](q, f, *s, cs, out, R, cs.shape[1], D=D, H=H, EPS=K.EPS, **c)
+    _qkv_rope[(3 * H // c["HB"], triton.cdiv(R, c["BM"]))](q, f, *s, cs, out, R, cs.shape[1], D=D, H=H, EPS=EPS, **c)
     return out
 
 
@@ -244,9 +244,9 @@ def quantize(W):
 
 
 def run_layer(h, x, lw, w_next, cs):
-    """model.run_layer with INT8 products; x = (INT8 rows, 64-value group factors) of the pre-norm input of the QKV product."""
+    """vision.run_layer with INT8 products; x = (INT8 rows, 64-value group factors) of the pre-norm input of the QKV product."""
     H = h.shape[1] // 64
-    a = K.attend(qkv_rope(*x, lw["qkv"], cs), cs.shape[1], H, H, 64)
+    a = attend(qkv_rope(*x, lw["qkv"], cs), cs.shape[1], H, H, 64)
     # [Agent] The MLP input gets one scale per row (group False): its product is the fused gate|up kernel.
     h, q, f = add_quant(h, gemm_groups(*quant_rows(a), *lw["wo"]), lw["w_pa"], lw["w_pre"], False)
     # [Agent] The last layer has no next pre-norm; its INT8 rows are never read, so any norm scale fills the slot.
