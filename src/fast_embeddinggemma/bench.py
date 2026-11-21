@@ -42,7 +42,7 @@ def run(paths: list[Path], precision: str, sizes: tuple[int, ...], threads: int)
     )
     t0 = time.perf_counter()
     E = load(precision, max_batch=max(32, *sizes))
-    print(f"load: {time.perf_counter() - t0:.1f} s ({precision}, {len(E['graphs'])} graphs)", flush=True)
+    print(f"load: {time.perf_counter() - t0:.1f} s ({precision}, {len(E.graphs)} graphs)", flush=True)
     for b in sizes:
         calls = make_calls(pictures, b)
         for _ in range(WARMUPS):

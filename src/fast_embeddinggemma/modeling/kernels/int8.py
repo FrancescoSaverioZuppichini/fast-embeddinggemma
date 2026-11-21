@@ -1,13 +1,12 @@
-"""INT8, the default precision: W8A8 vision products, weights per channel, activations one scale per 64 values (the MLP input:
-per row). QKV epilogue: q/k norms + RoPE; gate|up epilogue: gelu * up + INT8 packing. Attention, pooling and the text tower
-stay bf16. The kernels assume the vision head size, 64 (half-heads of 32 columns)."""
+"""The INT8 kernels of vision.Int8VisionLayer: W8A8 products, weights per channel, activations one scale per 64 values (the
+MLP input: per row). QKV epilogue: q/k norms + RoPE; gate|up epilogue: gelu * up + INT8 packing. They assume the vision head
+size, 64 (half-heads of 32 columns)."""
 
 import torch
 import triton
 import triton.language as tl
 from triton.language.extra.libdevice import tanh
 
-from .attention import attend
 from .norm import EPS, round_to
 
 # [Agent] Tile sizes from sweeps on an RTX 3090 at 140 tokens, batch 32; other cards may want others.
@@ -232,37 +231,3 @@ def quantize_weight(w: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
     """(N, K) -> INT8 (N, K) and the fp32 scale of each row (N,)."""
     s = (w.float().abs().amax(1) / 127.0).clamp_min(1e-8)
     return (w.float() / s[:, None] + 0.5).floor().clamp(-127, 127).to(torch.int8).contiguous(), s.contiguous()
-
-
-def quantize(W: dict) -> dict:
-    """Vision weights with INT8 products (replacing the bf16 ones); patch, position and embedder weights stay bf16."""
-
-    def layer(lw):
-        g, u = lw["gu"].chunk(2)
-        return lw | dict(
-            qkv=split_heads(*quantize_weight(lw["qkv"]), lw["qk"]),
-            wo=quantize_weight(lw["wo"]),
-            wd=quantize_weight(lw["wd"]),
-            gu=quantize_weight(g) + quantize_weight(u),
-        )
-
-    return W | dict(layers=[layer(lw) for lw in W["layers"]])
-
-
-def run_layer(
-    h: torch.Tensor, x: tuple[torch.Tensor, torch.Tensor], lw: dict, w_next: torch.Tensor | None, cs: torch.Tensor
-) -> tuple[torch.Tensor, tuple[torch.Tensor, torch.Tensor]]:
-    """vision.run_layer with INT8 products; x = (INT8 rows, 64-value group factors) of the pre-norm input of the QKV product."""
-    H = h.shape[1] // 64
-    a = attend(qkv_rope(*x, lw["qkv"], cs), cs.shape[1], H, H, 64)
-    # [Agent] The MLP input gets one scale per row (group False): its product is the fused gate|up kernel.
-    h, q, f = add_quant(h, gemm_groups(*quant_rows(a), *lw["wo"]), lw["w_pa"], lw["w_pre"], grouped=False)
-    # [Agent] The last layer has no next pre-norm; its INT8 rows are never read, so any norm scale fills the slot.
-    h, q, f = add_quant(
-        h,
-        gemm_groups(*gate_up(q, f, *lw["gu"]), *lw["wd"]),
-        lw["w_pf"],
-        lw["w_pf"] if w_next is None else w_next,
-        grouped=True,
-    )
-    return h, (q, f)

@@ -48,6 +48,12 @@ def bench(args: argparse.Namespace) -> None:
     run(list_pictures(args.folder)[: args.n], args.precision, tuple(args.sizes), args.threads)
 
 
+def convert(args: argparse.Namespace) -> None:
+    from .modeling.convert import convert as run
+
+    print(f"weights -> {run(args.out, args.checkpoint)}")
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="fast-embeddinggemma")
     commands = parser.add_subparsers(required=True)
@@ -66,5 +72,11 @@ def main(argv: list[str] | None = None) -> None:
     benchmark.add_argument("--sizes", type=int, nargs="+", default=[1, 8, 32], help="pictures per call")
     benchmark.add_argument("--threads", type=int, default=8, help="CPU threads that prepare the pictures")
     benchmark.set_defaults(run=bench)
+    converting = commands.add_parser("convert", help="Google's checkpoint -> our weights + tokenizer in a folder")
+    converting.add_argument("out", help="folder for model.safetensors and tokenizer.json")
+    converting.add_argument(
+        "--checkpoint", help="a local file in the layout of google/embeddinggemma-2's model.safetensors"
+    )
+    converting.set_defaults(run=convert)
     args = parser.parse_args(argv)
     args.run(args)

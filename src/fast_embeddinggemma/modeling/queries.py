@@ -1,20 +1,19 @@
-"""Search queries -> vectors through the engine's own text tower: the query prompt, the tokenizer, padding to a length bucket,
-the embedding rows (kept in host memory: the table never goes on the card), the masked tower, the mean over real tokens. One
-recorded CUDA graph per (bucket, queries), captured into the engine's memory pool. A query over 512 tokens runs eager at its
-exact length, with the sliding-window mask; past 8,192 tokens it is cut."""
+"""Search queries -> vectors through the model's own text tower: the query prompt, the tokenizer, padding to a length bucket,
+the embedding rows (kept in host memory: the table never goes on the card), model.embed_queries. One recorded CUDA graph per
+(bucket, queries), captured into the engine's memory pool. A query over 512 tokens runs eager at its exact length, with the
+sliding-window mask; past 8,192 tokens it is cut."""
 
 from functools import partial
+from pathlib import Path
 
 import numpy as np
 import torch
-import torch.nn.functional as F
-from huggingface_hub import hf_hub_download
+from safetensors import safe_open
 from tokenizers import Tokenizer
 
-from . import weights
 from .engine import Engine, capture_graph
 from .text import CFG as TEXT
-from .text import make_rope, run_tower
+from .text import make_rope
 
 PROMPT = "task: search result | query: "
 BUCKETS = (16, 32, 64, 128, 256, 512)
@@ -29,33 +28,28 @@ def fit_sizes(L: int) -> list[int]:
     return [B for B in SIZES if B * L <= ROWS]
 
 
-def run_query(emb: torch.Tensor, mask: torch.Tensor, T: dict) -> torch.Tensor:
-    """Embedded tokens (B, L, 512) + real-token mask (B, L) -> (B, 768) fp32 unit vectors: mean over real tokens, unit length."""
-    y, m = run_tower(emb, T, mask).float(), mask.unsqueeze(-1).float()
-    return F.normalize((y * m).sum(1) / m.sum(1), dim=-1)
-
-
 @torch.inference_mode()
 def load(E: Engine) -> dict:
-    """The tokenizer (cutting at LIMIT tokens), the embedding table in host memory, the RoPE of every bucket, the graphs."""
-    T = E["T"]
-    tokenizer = Tokenizer.from_file(hf_hub_download(weights.REPO, "tokenizer.json"))
+    """The tokenizer (cutting at LIMIT tokens) and token table beside the weights, the RoPE of every bucket, the graphs."""
+    model = E.model
+    tokenizer = Tokenizer.from_file(str(Path(E.weights).with_name("tokenizer.json")))
     tokenizer.enable_truncation(LIMIT)
-    table = weights.open_file(E["checkpoint"]).get_tensor("language_model.embed_tokens.weight")
-    T["rope"].update({L: make_rope(L) for L in BUCKETS})
+    with safe_open(E.weights, "pt", device="cpu") as f:
+        table = f.get_tensor("embed_tokens")
+    model.text.rope.update({L: make_rope(L) for L in BUCKETS})
     graphs = {}
     for L in BUCKETS:
         for B in fit_sizes(L):
             # [Agent] Random rows, not zeros: an all-zero input gives zero vectors and would fail the unit-length check.
-            emb = torch.randn(B, L, TEXT["dim"], device="cuda").to(torch.bfloat16)
+            emb = torch.randn(B, L, TEXT.dim, device="cuda").to(torch.bfloat16)
             mask = torch.ones(B, L, dtype=torch.bool, device="cuda")
-            graph, out = capture_graph(partial(run_query, emb, mask, T), E["pool"])
+            graph, out = capture_graph(partial(model.embed_queries, emb, mask), E.pool)
             graph.replay()
             if not torch.allclose(out.norm(dim=-1), torch.ones(B, device="cuda"), atol=1e-3):
                 raise RuntimeError(f"query graph {L} x {B}: the replay is not unit vectors")
             graphs[L, B] = emb, mask, graph, out
-    scale = torch.tensor(TEXT["dim"] ** 0.5, dtype=torch.bfloat16)
-    return dict(T=T, tokenizer=tokenizer, table=table, scale=scale, graphs=graphs)
+    scale = torch.tensor(TEXT.dim**0.5, dtype=torch.bfloat16)
+    return dict(model=model, tokenizer=tokenizer, table=table, scale=scale, graphs=graphs)
 
 
 def replay_bucket(Q: dict, ids: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
@@ -74,14 +68,14 @@ def embed_long(Q: dict, seq: list[int]) -> torch.Tensor:
     L = len(seq)
     emb = (Q["table"][torch.tensor(seq)] * Q["scale"]).to("cuda")[None]
     mask = torch.ones(1, L, dtype=torch.bool, device="cuda")
-    return run_query(emb, mask, Q["T"] | {"rope": {L: make_rope(L)}})[0]
+    return Q["model"].embed_queries(emb, mask, make_rope(L))[0]
 
 
 @torch.inference_mode()
 def embed(Q: dict, texts: list[str]) -> np.ndarray:
     """Texts -> (n, 768) float32 unit vectors in input order; queries of one bucket share a graph."""
     seqs = [e.ids for e in Q["tokenizer"].encode_batch([PROMPT + t for t in texts])]
-    out = torch.empty(len(texts), TEXT["out"], device="cuda")
+    out = torch.empty(len(texts), TEXT.out, device="cuda")
     groups = {}
     for i, s in enumerate(seqs):
         L = next((b for b in BUCKETS if b >= len(s)), None)

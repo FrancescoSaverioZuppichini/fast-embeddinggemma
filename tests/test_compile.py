@@ -5,8 +5,8 @@ import pytest
 import triton
 from triton.backends.compiler import GPUTarget
 
-from fast_embeddinggemma.modeling import attention, mlp, norm
-from fast_embeddinggemma.modeling import int8 as I
+from fast_embeddinggemma.modeling.kernels import attention, mlp, norm
+from fast_embeddinggemma.modeling.kernels import int8 as I
 
 BF, F32, I8, EPS = "*bf16", "*fp32", "*i8", norm.EPS
 

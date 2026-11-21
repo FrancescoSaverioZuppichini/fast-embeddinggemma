@@ -38,7 +38,7 @@ def process(image: Picture) -> tuple[Grid, torch.Tensor]:
     image = decode(image)
     rows, cols = pick_canvas(image.width, image.height)
     # [Agent] A canvas cell is pool x pool patches of patch x patch pixels: 3 x 16 = 48 px.
-    p, n = VISION["patch"], VISION["pool"]
+    p, n = VISION.patch, VISION.pool
     pixels = torch.from_numpy(np.array(image)).permute(2, 0, 1)
     pixels = tvF.resize(
         pixels, [p * n * rows, p * n * cols], interpolation=tvF.InterpolationMode.BICUBIC, antialias=True

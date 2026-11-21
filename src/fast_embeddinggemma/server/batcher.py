@@ -44,7 +44,7 @@ class Busy(Exception):
 def start(settings: Settings) -> dict:
     """Load the engine and its query graphs and start the GPU thread; every request works through the returned state."""
     engine = load(settings.precision, max_batch=settings.max_batch)
-    engine["queries"] = queries.load(engine)
+    engine.queries = queries.load(engine)
     state: dict[str, Any] = dict(
         engine=engine,
         settings=settings,
@@ -135,7 +135,7 @@ def run_texts(state: dict, jobs: list[tuple[list[str], Future]]) -> list[np.ndar
     """Every waiting query of every request in one call; each request gets its rows back."""
     batch = [t for request, _ in jobs for t in request]
     with tracer.start_as_current_span("embed.queries", attributes={"texts": len(batch)}):
-        vectors = queries.embed(state["engine"]["queries"], batch)
+        vectors = queries.embed(state["engine"].queries, batch)
     TEXTS.add(len(batch))
     ends = np.cumsum([len(request) for request, _ in jobs])
     return np.split(vectors, ends[:-1])

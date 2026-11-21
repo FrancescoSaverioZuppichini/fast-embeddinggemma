@@ -48,6 +48,6 @@ def embed_images(model: Engine, images: Iterable[Picture], dim: int = 768, threa
 
 def embed_texts(model: Engine, texts: Iterable[str], dim: int = 768) -> np.ndarray:
     """Search queries -> (n, dim) float32 unit vectors in the pictures' space. The query graphs are built on the first call."""
-    if "queries" not in model:
-        model["queries"] = queries.load(model)
-    return cut(queries.embed(model["queries"], list(texts)), dim)
+    if model.queries is None:
+        model.queries = queries.load(model)
+    return cut(queries.embed(model.queries, list(texts)), dim)

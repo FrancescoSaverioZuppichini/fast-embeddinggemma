@@ -63,8 +63,8 @@ don't mix them in one index.
 
 ## How it's fast
 
-1. **Its own engine.** About 600 lines of PyTorch + Triton that run the checkpoint's weights directly and match the
-   reference's maths. There's no `transformers` at runtime.
+1. **Its own model code.** Plain PyTorch modules (`vision.py`, `text.py`, `model.py`) that read like Hugging Face's
+   modeling files and call fused Triton kernels, with the reference's maths. There's no `transformers` at runtime.
 2. **Seven fixed canvases.** At 140 tokens every picture goes onto one of 7 grids, chosen by aspect ratio. Shapes are
    static, so nothing is padded and nothing is masked.
 3. **CUDA graphs.** The whole forward pass is recorded once per (canvas, batch size), and a batch is one replay. There's
@@ -117,9 +117,16 @@ url = "https://download.pytorch.org/whl/cu130"
 explicit = true
 ```
 
-The weights download into the Hugging Face cache on first use. They're gated: accept the Gemma terms on the
-[model page](https://huggingface.co/google/embeddinggemma-2) and log in once with `hf auth login`. With
-`HF_HUB_OFFLINE=1` the package never touches the network.
+The weights download on first use from [Francesco/fast-embeddinggemma](https://huggingface.co/Francesco/fast-embeddinggemma):
+Google's checkpoint converted once into this package's names (q|k|v and gate|up fused, the token table and tokenizer
+included, the audio tower left out), 878 MB instead of Google's full file, with bit-identical vectors. The repo is
+private: log in with an account that can read it (`hf auth login`, or `HF_TOKEN`). With `HF_HUB_OFFLINE=1` the package
+never touches the network.
+
+To build the weights yourself from [google/embeddinggemma-2](https://huggingface.co/google/embeddinggemma-2) (gated: accept
+the Gemma terms there first), run `fast-embeddinggemma convert ./weights` and pass
+`load(weights="./weights/model.safetensors")`. The weights stay under the
+[Gemma terms of use](https://ai.google.dev/gemma/terms).
 
 ## Use it from Python
 
@@ -132,9 +139,10 @@ query = feg.embed_texts(model, ["a cat on a sofa"])  # (1, 768), same space
 scores = query @ images.T  # cosine similarity
 ```
 
-- **`load(precision="int8", checkpoint=None, max_batch=32)`** loads the weights and records one CUDA graph per canvas and
-  batch size. `checkpoint` is a local file in the Hugging Face layout. `max_batch` records bigger graphs: 64 and 128
-  gain under 1% here and cost about 1.4 GB per doubling.
+- **`load(precision="int8", weights=None, max_batch=32)`** loads the weights and records one CUDA graph per canvas and
+  batch size. `weights` is a file made by `fast-embeddinggemma convert` (default: the published one). `max_batch` records
+  bigger graphs: 64 and 128 gain under 1% here and cost about 1.4 GB per doubling. The model itself is
+  `engine.model`, a plain `torch.nn.Module` (`EmbeddingGemma2`) you can call eagerly: `model.embed_images(patches, canvas)`.
 - **`embed_images(model, images, dim=768, threads=8)`** takes paths, bytes, PIL images or uint8 RGB arrays, any number of
   them. It prepares 256 at a time on CPU threads while the card works, and returns vectors in input order. A picture
   that can't be read raises `ValueError` with its position. `dim` of 512, 256 or 128 cuts the vector (Matryoshka) and
@@ -149,6 +157,7 @@ scores = query @ images.T  # cosine similarity
 fast-embeddinggemma embed ./photos --out vectors.npy   # every picture under a folder; the paths go to vectors.txt
 fast-embeddinggemma bench ./photos --sizes 1 8 32      # model-only pictures a second
 fast-embeddinggemma serve                              # the service (needs the [server] extra)
+fast-embeddinggemma convert ./weights                  # Google's checkpoint -> this package's weights + tokenizer
 ```
 
 ## The service
@@ -237,22 +246,22 @@ OTEL_PYTHON_EXCLUDED_URLS=health uv run opentelemetry-instrument fast-embeddingg
 
 ## Code
 
+Read the model in this order, each file top to bottom: `vision.py`, `text.py`, `model.py`.
+
 ```
 src/fast_embeddinggemma/
   __init__.py        load, embed_images, embed_texts, process, embed, CANVASES
   preprocessing.py   any picture -> canvas + uint8 patches (CPU)
-  cli.py, bench.py   fast-embeddinggemma embed | bench | serve
-  modeling/          the network
+  cli.py, bench.py   fast-embeddinggemma embed | bench | serve | convert
+  modeling/
+    vision.py        Config, VisionLayer, Int8VisionLayer, VisionTower: patches -> 16 layers -> 3x3 average -> image tokens
+    text.py          Config, TextLayer, TextTower: tokens -> 24 layers -> 768 numbers per token
+    model.py         EmbeddingGemma2 = vision + text: embed_images, embed_queries; load_model
     canvas.py        the 7 canvases, which one a picture goes on, their position and RoPE tables
-    weights.py       reading the checkpoint, one layer reader for both towers
-    norm.py          RMS norm, the fused add + norm kernel, bf16 rounding
-    attention.py     the fused q/k norm + RoPE kernel, attention
-    mlp.py           the fused GELU x up kernel
-    int8.py          INT8 mode: weight quantization, its kernels, the INT8 vision layer
-    vision.py        patches -> 16 layers -> 3x3 pooling -> soft tokens
-    text.py          soft tokens -> 24-layer text tower -> the vector
-    engine.py        load (weights + CUDA graphs) and embed
+    engine.py        load (model + CUDA graphs per canvas and batch size) and embed
     queries.py       search queries through the text tower, one graph per length bucket
+    convert.py       Google's checkpoint -> this package's weights (the only file that knows its names)
+    kernels/         the Triton kernels: norm.py (fused add + norm), attention.py (q/k norm + RoPE), mlp.py (GELU x up), int8.py
   server/            the service
     config.py        settings (EMBED_*)
     schemas.py       the HTTP contract (the OpenAPI page)

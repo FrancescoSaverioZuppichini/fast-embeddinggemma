@@ -7,7 +7,7 @@ from typing import Literal
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from ..modeling.weights import REPO
+from ..modeling.convert import GOOGLE
 
 
 class Settings(BaseSettings):
@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     @property
     def tag(self) -> str:
         """What the vectors are: the checkpoint and its precision. Requests must name it; a new tag is a new vector space."""
-        return f"{REPO}@{self.precision}"
+        return f"{GOOGLE}@{self.precision}"
 
     @cached_property
     def roots(self) -> list[Path]:
