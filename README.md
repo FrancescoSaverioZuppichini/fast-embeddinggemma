@@ -34,7 +34,6 @@ versions the vectors were measured on.
 
 ```bash
 uv add git+https://github.com/FrancescoSaverioZuppichini/fast-embeddinggemma            # the engine
-uv add "fast-embeddinggemma[text] @ git+https://github.com/FrancescoSaverioZuppichini/fast-embeddinggemma"    # + search queries
 uv add "fast-embeddinggemma[server] @ git+https://github.com/FrancescoSaverioZuppichini/fast-embeddinggemma"  # + HTTP service
 ```
 
@@ -62,7 +61,7 @@ import fast_embeddinggemma as feg
 
 model = feg.load()  # INT8, ~10 s; feg.load(precision="bf16") for vectors closer to the reference
 images = feg.embed_images(model, ["cat.jpg", png_bytes, pil_image, rgb_array])  # (4, 768) float32, unit length
-query = feg.embed_texts(model, ["a cat on a sofa"])  # (1, 768), same space ([text] extra)
+query = feg.embed_texts(model, ["a cat on a sofa"])  # (1, 768), same space, ~2 ms
 scores = query @ images.T  # cosine similarity
 
 # one level down: prepare one picture, then embed many of one canvas in one call (vectors stay on the card)
@@ -72,7 +71,7 @@ on_card = feg.embed(model, grid, patches[None])  # (1, 768)
 
 - `load(device="cuda", precision="int8", checkpoint=None)` loads the weights and builds 84 CUDA graphs (7 canvases x 12 batch sizes). `checkpoint` is an HF-layout safetensors file; by default the hub checkpoint.
 - `embed_images(model, images, dim=768, threads=8)` takes paths, bytes, PIL images or uint8 RGB arrays, any number of them. They're prepared 256 at a time on CPU threads while the card works, grouped by canvas, and the vectors come back in input order. A picture that can't be read raises an error naming its index. `dim` of 512, 256 or 128 cuts the vector and makes it unit length again.
-- `embed_texts(model, texts, dim=768)` embeds search queries, with the query prompt added. The text model loads on the first call (needs the `[text]` extra).
+- `embed_texts(model, texts, dim=768)` embeds search queries through the engine's own text tower, with the query prompt added: one recorded CUDA graph per length bucket (16 to 512 tokens), about 2 ms per query, and the same vectors as the Hugging Face text model (cosine 0.99996 on 1,000 public texts). The graphs are built on the first call (about 2 s). Queries over 512 tokens are cut at 512.
 - `process(image)` prepares one picture exactly the way the stock sidecar's decode feeds the model: Pillow (with the JPEG draft scale-down for files and bytes) + EXIF turn + Lanczos thumbnail to 1,135 px, then torchvision's uint8 bicubic antialias squash onto the nearest canvas. A path, bytes, a PIL image and an array of the same picture give the same patches.
 - `embed(model, grid, pieces)` takes uint8 patches of one canvas, as one tensor or a list of tensors, in pinned memory or on the card, copied straight into the graph's input. Any batch size works: up to 32 pictures take at most two graph replays. Call it from one thread only.
 - `canvases()` returns the 7 grids, as (rows, cols).
@@ -93,7 +92,7 @@ fast-embeddinggemma serve --port 8100                 # the HTTP service (needs 
 
 How it handles work:
 - Pictures are prepared on CPU threads, then batched across requests on one GPU thread. Each batch takes the canvas whose oldest picture has waited longest, with no waiting window.
-- Text is always a search query. It gets the query prompt and runs the stock Hugging Face text tower, eager, about 25 ms per query; only the language model goes to the card. `torch.compile` would make a warm query 4 ms, but start-up 99 s instead of 22 s, and each new query length would recompile for up to 85 s. Moving queries onto the engine's own text tower would drop `transformers` and about 0.9 GB of card memory. That's a later milestone.
+- Text is always a search query. It gets the query prompt and runs through the engine's own text tower, one CUDA graph per length bucket, about 2 ms per query (the Hugging Face text model took 25 ms uncompiled). No second copy of the model is loaded: the query graphs share the engine's memory and add about 4 MiB. Queries over 512 tokens are cut at 512.
 - The engine's memory is fixed at load, so there is no per-process memory cap.
 - It opens any path it is sent, so keep it on 127.0.0.1.
 
@@ -129,7 +128,7 @@ src/fast_embeddinggemma/
     vision.py        patches -> 16 layers -> 3x3 pooling -> soft tokens
     text.py          soft tokens -> 24-layer text tower -> the vector
     engine.py        load (weights + CUDA graphs) and embed
-    queries.py       search queries through the Hugging Face text model
+    queries.py       search queries through the engine's text tower, one graph per length bucket
 ```
 
 ## Develop

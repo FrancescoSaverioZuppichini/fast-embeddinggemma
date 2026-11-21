@@ -33,11 +33,13 @@ def make_rope(L, device, dtype):
     return tables
 
 
-def run_text_layer(h, x, lw, ple, rope, w_next):
+def run_text_layer(h, x, lw, ple, rope, w_next, mask=None):
     """Text layer on residual h (N, 512) and its input norm x -> h and the next input norm (w_next: next layer's or final)."""
     hd, H = lw["qk"].shape[1], CFG["heads"]
     qkv = prep_qkv(F.linear(x, lw["qkv"]), rope[hd], lw["qk"], H, lw["kv"], hd // 2)
-    h, x = add_norm(h, F.linear(attend(qkv, rope[hd].shape[1], H, lw["kv"], hd), lw["wo"]), lw["w_pa"], lw["w_pre"])
+    h, x = add_norm(
+        h, F.linear(attend(qkv, rope[hd].shape[1], H, lw["kv"], hd, mask), lw["wo"]), lw["w_pa"], lw["w_pre"]
+    )
     h, _ = add_norm(
         h, F.linear(gelu_up(*F.linear(x, lw["gu"]).chunk(2, -1)), lw["wd"]), lw["w_pf"], None
     )  # PLE reads raw h
@@ -45,16 +47,20 @@ def run_text_layer(h, x, lw, ple, rope, w_next):
     return add_norm(h, F.linear(gelu_up(F.linear(h, lw["gate"]), ple), lw["proj"]), lw["w_ple"], w_next, lw["scalar"])
 
 
-def run_text(tokens, T):
-    """Soft tokens (B, n, 512) -> (B, 768) fp32 unit vectors."""
-    B, n, D = tokens.shape
-    s = T["special"].expand(B, 4, D)
-    x = torch.cat([s[:, :2], tokens, s[:, 2:]], 1).reshape(B * (n + 4), D)
+def run_tower(x, T, mask=None):
+    """Embedded tokens (B, L, 512) -> the 768-d vector of every token (B, L, 768), before the mean; mask (B, L) bool = real keys."""
+    B, L, D = x.shape
+    x = x.reshape(B * L, D)
     # [Agent] PLE: one projection of the input to 24 x 512, scaled by 512^-0.5 and normed per layer; layer i reads slice i.
     ple = rms_norm((F.linear(x, T["ple"]) * D**-0.5).view(-1, CFG["layers"], D), T["ple_norm"])
     h, x, lws = x, rms_norm(x, T["layers"][0]["w_in"]), T["layers"]
     for i, lw in enumerate(lws):
-        h, x = run_text_layer(
-            h, x, lw, ple[:, i], T["rope"][n + 4], lws[i + 1]["w_in"] if i + 1 < len(lws) else T["norm"]
-        )
-    return F.normalize(F.linear(x, T["out"]).view(B, n + 4, -1).float().mean(1), dim=-1)
+        w_next = lws[i + 1]["w_in"] if i + 1 < len(lws) else T["norm"]
+        h, x = run_text_layer(h, x, lw, ple[:, i], T["rope"][L], w_next, mask)
+    return F.linear(x, T["out"]).view(B, L, -1)
+
+
+def run_text(tokens, T):
+    """Soft tokens (B, n, 512) -> (B, 768) fp32 unit vectors: [bos, boi, tokens, eoi, eos] through the tower, mean, unit length."""
+    s = T["special"].expand(tokens.shape[0], 4, tokens.shape[2])
+    return F.normalize(run_tower(torch.cat([s[:, :2], tokens, s[:, 2:]], 1), T).float().mean(1), dim=-1)

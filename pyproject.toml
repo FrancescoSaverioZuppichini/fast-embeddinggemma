@@ -13,14 +13,14 @@ dependencies = [
     "numpy>=2",
     "pillow==13.0.0",
     "safetensors>=0.5",
+    "tokenizers>=0.23",
     "torch==2.14.0",
     "torchvision==0.29.0",
     "triton==3.8.0",
 ]
 
 [project.optional-dependencies]
-text = ["transformers==5.22.2"]
-server = ["fast-embeddinggemma[text]", "fastapi>=0.162", "pydantic>=2.14", "uvicorn>=0.54"]
+server = ["fastapi>=0.162", "pydantic>=2.14", "uvicorn>=0.54"]
 
 [project.scripts]
 fast-embeddinggemma = "fast_embeddinggemma.cli:main"

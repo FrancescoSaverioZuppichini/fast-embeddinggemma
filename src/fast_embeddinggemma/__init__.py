@@ -53,7 +53,7 @@ def embed_images(model, images, dim=768, threads=8):
 
 
 def embed_texts(model, texts, dim=768):
-    """Search queries -> (n, dim) float32 unit vectors in the pictures' space. The text model loads on the first call."""
+    """Search queries -> (n, dim) float32 unit vectors in the pictures' space. The query graphs are built on the first call."""
     if "queries" not in model:
-        model["queries"] = queries.load()
+        model["queries"] = queries.load(model)
     return cut(queries.embed(model["queries"], list(texts)), dim)

@@ -58,7 +58,9 @@ def capture_graph(fn, pool):
 def build_graphs(E):
     """Every (canvas, size) graph over one weight set and one pool (graphs never run at once, so a capture reuses what
     earlier captures freed); each reads a prefix of one uint8 buffer. A graph whose replay is not unit vectors raises."""
-    pool, sizes, P, dev = torch.cuda.graph_pool_handle(), SIZES, 3 * VISION["patch"] ** 2, E["W"]["pos"].device
+    # [Agent] The pool is kept on the engine: the query graphs (queries.py) capture into it and add almost no memory.
+    E["pool"] = pool = torch.cuda.graph_pool_handle()
+    sizes, P, dev = SIZES, 3 * VISION["patch"] ** 2, E["W"]["pos"].device
     buf = torch.zeros(max(sizes) * 9 * max(r * c for r, c in CANVASES) * P, dtype=torch.uint8, device=dev)
     graphs = {}
     for rows, cols in CANVASES:

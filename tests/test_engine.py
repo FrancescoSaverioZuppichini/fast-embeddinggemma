@@ -39,3 +39,12 @@ def test_dim(engine, pictures):
 def test_bad_picture(engine, pictures):
     with pytest.raises(ValueError, match="picture 1"):
         feg.embed_images(engine, [pictures["png_300x300"], b"not a picture"])
+
+
+def test_texts(engine):
+    """Queries of different lengths in one call (different buckets) give each its own vector, the same as alone."""
+    texts = ["a cat on a sofa", "receipts from the dentist " * 30, "sunset over the lake"]
+    together = feg.embed_texts(engine, texts)
+    alone = np.concatenate([feg.embed_texts(engine, [t]) for t in texts])
+    assert together.shape == (3, 768) and np.allclose(np.linalg.norm(together, axis=1), 1, atol=1e-3)
+    assert np.einsum("ij,ij->i", together, alone).min() > 0.9999

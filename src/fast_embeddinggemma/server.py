@@ -1,6 +1,6 @@
 """HTTP service with the contract of the embedding sidecar it replaces: POST /embed {model, inputs: [{id, path} | {id, text}], query}
 -> {model, dims, vectors: [{id, vec}], failed: [{id, error}]} and GET /health. Pictures are prepared on CPU threads, then
-merged across requests into one engine call per canvas on ONE GPU thread; text queries run the stock Hugging Face text tower.
+merged across requests into one engine call per canvas on ONE GPU thread; text queries run the engine's own text tower.
 Settings are EMBED_* environment variables. Run: fast-embeddinggemma serve."""
 
 import asyncio
@@ -149,9 +149,10 @@ async def lifespan(_):
     if ENV("EMBED_IMAGE_TOKENS", "140") != "140":
         raise ValueError("the engine's canvases are built for 140 image tokens")
     started = time.time()
+    engine = modeling.load("cuda", CFG["precision"])
     STATE.update(
-        engine=modeling.load("cuda", CFG["precision"]),
-        queries=queries.load(CFG["model"]),
+        engine=engine,
+        queries=queries.load(engine),
         lock=threading.Lock(),
         queues={g: deque() for g in modeling.canvases()},
         prep=ThreadPoolExecutor(CFG["threads"]),
