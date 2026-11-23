@@ -30,7 +30,7 @@ import httpx
 import numpy as np
 from datasets import Dataset, DatasetDict, Features, Value, load_from_disk
 from datasets import Image as ImageFeature
-from PIL import Image, ImageEnhance, ImageFilter, ImageOps
+from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont, ImageOps
 
 from fast_embeddinggemma.modeling.canvas import CANVASES, pick_canvas
 from fast_embeddinggemma.quality import HEADLINE
@@ -700,7 +700,86 @@ def build_table(work, meta, narratives, sizes, captions, chosen, distractors):
     return table
 
 
+INTER = "https://github.com/google/fonts/raw/main/ofl/inter/Inter%5Bopsz%2Cwght%5D.ttf"
+BANNER = {
+    "width": 2400,
+    "height": 1260,
+    "row": 34,
+    "gap": 3,
+    "tint": (226, 232, 236),
+    "fade": 0.86,
+    "reveal": 0.3,
+    "text": 1100,
+}
+
+
+def get_font(work, size, weight):
+    path = work / "Inter.ttf"
+    if not path.exists():
+        download(INTER, path)
+    font = ImageFont.truetype(str(path), size)
+    font.set_variation_by_axes([32, weight])  # Inter's axes: optical size, weight
+    return font
+
+
+def lay_rows(pictures, width, height, row, gap):
+    """Justified rows: photos at one height until a row overflows, then the row scaled to the exact width."""
+    tiles, y = [], 0
+    while y < height:
+        line = []
+        while sum(im.width * row / im.height + gap for im in line) < width:
+            line.append(next(pictures))
+        scale = width / sum(im.width * row / im.height + gap for im in line)
+        h, x = round(row * scale), 0.0
+        for im in line:
+            w = im.width * row / im.height * scale
+            tiles.append((im, round(x), y, min(round(x + w), width), min(y + h, height)))
+            x += w + gap * scale
+        y += h + gap
+    return tiles
+
+
+def make_banner(work, ids):
+    """The card's banner: test thumbnails at their own shapes, faded into one colour except where they spell 5k, under a
+    label with a tall, a square and a wide frame. The photos come in rank order, so a rebuild draws the same banner."""
+    b, width, height = BANNER, BANNER["width"], BANNER["height"]
+    tiles = lay_rows((open_rgb(work / "thumbs" / f"{i}.webp") for i in ids), width, height, b["row"], b["gap"])
+    big, small = get_font(work, b["text"], 900), get_font(work, 58, 600)
+    pill, space = 112, 70
+    mask = Image.new("L", (width, height))
+    draw = ImageDraw.Draw(mask)
+    left, top, right, _ = draw.textbbox((0, 0), "5k", font=big, anchor="ls")
+    # [Agent] The label and the letters are centred as one block; `top` is the letters' height above the baseline,
+    # negative.
+    block = (height - pill - space + top) / 2
+    draw.text(((width - right + left) / 2 - left, block + pill + space - top), "5k", font=big, fill=255, anchor="ls")
+    inside = np.asarray(mask) > 0
+    canvas = Image.new("RGB", (width, height), tuple(c // 2 for c in b["tint"]))
+    for im, x0, y0, x1, y1 in tiles:
+        if x1 - x0 < 2 or y1 - y0 < 2:
+            continue
+        tile = im.resize((x1 - x0, y1 - y0), Image.Resampling.LANCZOS)
+        # [Agent] A tile keeps its colour when enough of it lies inside the letters, so 5k is drawn in whole photos.
+        if inside[y0:y1, x0:x1].mean() < b["reveal"]:
+            tile = Image.blend(tile, Image.new("RGB", tile.size, b["tint"]), b["fade"])
+        canvas.paste(tile, (x0, y0))
+    draw = ImageDraw.Draw(canvas)
+    label, frame, pad = "Aspect Retrieval", 52, 40
+    frames = [a * frame for a in (9 / 16, 1, 16 / 9)]
+    text_x = pad + sum(frames) + 12 * 2 + 26
+    x0 = (width - text_x - draw.textlength(label, font=small) - pad) / 2
+    draw.rounded_rectangle((x0, block, width - x0, block + pill), radius=22, fill=(14, 14, 18))
+    x, mid = x0 + pad, block + pill / 2
+    for w in frames:
+        draw.rounded_rectangle((x, mid - frame / 2, x + w, mid + frame / 2), radius=6, outline="white", width=5)
+        x += w + 12
+    draw.text((x0 + text_x, mid), label, font=small, fill="white", anchor="lm")
+    canvas.save(work / "banner.jpg", quality=90)
+
+
 CARD = """# Aspect Retrieval 5K
+
+![Aspect Retrieval 5K: test photos at their own shapes, spelling 5k](https://huggingface.co/datasets/Francesco/aspect-retrieval-5k/resolve/main/assets/banner.jpg)
 
 A photo search benchmark where **every aspect ratio counts the same**: 5,040 Open Images photos, 720 in each of seven
 shape buckets from tall 9:16 portraits through square to wide 16:9 landscapes, searched among 25,040 photos.
@@ -838,7 +917,8 @@ own config of the same name, because their columns differ.
 
 The photos are CC BY 2.0 by their Flickr authors (`author`, `author_url` and `source_url` on every row). `thumb`,
 `neardup` and `sketch` are adaptations under the same license. The Localized Narratives (Pont-Tuset et al., 2020) are CC
-BY 4.0. The AI queries and everything else here are CC BY 4.0.
+BY 4.0. The AI queries and everything else here are CC BY 4.0. The banner is a mosaic of `test` thumbnails, each
+credited on its row.
 
 ## Citation
 
@@ -1016,13 +1096,18 @@ def push(work, card_text):
     card.text = card_text
     card.push_to_hub(REPO, token=token, commit_message="aspect-retrieval-5k v1.0: the card")
     api = HfApi(token=token)
-    for name in ("captions.jsonl", "safety.jsonl"):
+    files = {
+        "build/captions.jsonl": "captions.jsonl",
+        "build/safety.jsonl": "safety.jsonl",
+        "assets/banner.jpg": "banner.jpg",
+    }
+    for target, name in files.items():
         api.upload_file(
             path_or_fileobj=work / name,
-            path_in_repo=f"build/{name}",
+            path_in_repo=target,
             repo_id=REPO,
             repo_type="dataset",
-            commit_message=f"aspect-retrieval-5k v1.0: every request and answer ({name})",
+            commit_message=f"aspect-retrieval-5k v1.0: {target}",
         )
     api.create_tag(REPO, tag="v1.0", repo_type="dataset")
     print(f"push: https://huggingface.co/datasets/{REPO} at v1.0")
@@ -1069,6 +1154,8 @@ def main():
         return
     if not (work / "table").exists():
         build_table(work, meta, narratives, sizes, captions, chosen, extra)
+    if not (work / "banner.jpg").exists():
+        make_banner(work, targets)
     if args.push:
         results = [(r["setup"], r["report"]) for r in (json.loads(Path(f).read_text()) for f in args.push)]
         distractors = {"ids": extra, "reasons": reasons}
