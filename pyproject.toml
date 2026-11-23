@@ -30,11 +30,16 @@ server = [
     "uvicorn>=0.54",
 ]
 
+# [Agent] `eval`, and `bench` without a folder, read the aspect-retrieval-5k dataset from the Hub.
+eval = ["datasets>=4"]
+
 [project.scripts]
 fast-embeddinggemma = "fast_embeddinggemma.cli:main"
 
 [dependency-groups]
 dev = ["grpcio-tools>=1.70", "httpx>=0.28", "pytest>=8", "ruff>=0.9"]
+# [Agent] Only scripts/build_dataset.py needs these; the package and its CLI never import them.
+dataset = ["datasets>=4", "httpx>=0.28", "opencv-python-headless>=4.10"]
 
 [build-system]
 requires = ["uv_build>=0.13,<0.14"]

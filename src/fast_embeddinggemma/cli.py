@@ -1,4 +1,5 @@
-"""fast-embeddinggemma serve | embed | bench. Each subcommand imports its own module, so `embed` and `bench` need no server extra."""
+"""fast-embeddinggemma serve | embed | bench | eval. Each subcommand imports its own module, so `embed` and `bench` need no
+server extra; `eval` and a `bench` without a folder need the eval extra (the dataset)."""
 
 import argparse
 from pathlib import Path
@@ -45,7 +46,25 @@ def embed(args: argparse.Namespace) -> None:
 def bench(args: argparse.Namespace) -> None:
     from .bench import run
 
-    run(list_pictures(args.folder)[: args.n], args.precision, tuple(args.sizes), args.threads)
+    if args.folder:
+        pictures = list_pictures(args.folder)
+    else:
+        from .quality import load_rows
+
+        pictures = list(load_rows(args.revision, args.data)["test"]["thumb"])
+    run(pictures[: args.n], args.precision, tuple(args.sizes), args.threads)
+
+
+def evaluate(args: argparse.Namespace) -> None:
+    import os
+
+    # [Agent] As for `serve`: the allocator grows mappings instead of rounding up fixed blocks, so the eval fits beside
+    # another process on the card (3.1 GB instead of 4.5). Set before torch touches CUDA; the environment wins.
+    os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
+
+    from .quality import run
+
+    run(args.precision, args.dim, args.revision, args.data, args.out)
 
 
 def convert(args: argparse.Namespace) -> None:
@@ -65,13 +84,25 @@ def main(argv: list[str] | None = None) -> None:
     embedding.add_argument("--precision", default="int8", choices=("int8", "bf16"))
     embedding.add_argument("--dim", type=int, default=768, choices=(768, 512, 256, 128))
     embedding.set_defaults(run=embed)
-    benchmark = commands.add_parser("bench", help="model-only img/s on the pictures of a folder")
-    benchmark.add_argument("folder")
+    benchmark = commands.add_parser(
+        "bench", help="model-only img/s on the pictures of a folder, or on aspect-retrieval-5k's thumbnails"
+    )
+    benchmark.add_argument("folder", nargs="?")
     benchmark.add_argument("--precision", default="int8", choices=("int8", "bf16"))
-    benchmark.add_argument("--n", type=int, default=256, help="pictures: the first n by name")
+    benchmark.add_argument("--n", type=int, help="pictures: the first n (by name in a folder), default all")
     benchmark.add_argument("--sizes", type=int, nargs="+", default=[1, 8, 32], help="pictures per call")
     benchmark.add_argument("--threads", type=int, default=8, help="CPU threads that prepare the pictures")
     benchmark.set_defaults(run=bench)
+    evaluating = commands.add_parser(
+        "eval", help="search quality on aspect-retrieval-5k: R@1/5/10 and MRR per query kind"
+    )
+    evaluating.add_argument("--precision", default="int8", choices=("int8", "bf16"))
+    evaluating.add_argument("--dim", type=int, default=768, choices=(768, 512, 256, 128))
+    evaluating.add_argument("--out", default="quality.json")
+    evaluating.set_defaults(run=evaluate)
+    for command in (benchmark, evaluating):
+        command.add_argument("--revision", default="v1.0", help="the dataset version on the Hub")
+        command.add_argument("--data", help="a local copy saved with save_to_disk, instead of the Hub")
     converting = commands.add_parser("convert", help="Google's checkpoint -> our weights + tokenizer in a folder")
     converting.add_argument("out", help="folder for model.safetensors and tokenizer.json")
     converting.add_argument(

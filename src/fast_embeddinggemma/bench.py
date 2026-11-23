@@ -5,7 +5,6 @@ Model-only on purpose: the card's speed, not the disk's or the decoder's."""
 import statistics
 import time
 from concurrent.futures import ThreadPoolExecutor
-from pathlib import Path
 
 import torch
 
@@ -33,10 +32,10 @@ def time_sweep(E: Engine, calls: list[tuple[Grid, torch.Tensor]]) -> float:
     return time.perf_counter() - t0
 
 
-def run(paths: list[Path], precision: str, sizes: tuple[int, ...], threads: int) -> None:
+def run(pictures: list, precision: str, sizes: tuple[int, ...], threads: int) -> None:
     t0 = time.perf_counter()
     with ThreadPoolExecutor(threads) as pool:
-        pictures = list(pool.map(process, paths))
+        pictures = list(pool.map(process, pictures))
     print(
         f"prep: {len(pictures)} pictures on {threads} threads, {len(pictures) / (time.perf_counter() - t0):.0f} img/s"
     )
@@ -52,3 +51,12 @@ def run(paths: list[Path], precision: str, sizes: tuple[int, ...], threads: int)
             f"{precision} batch {b}: {statistics.median(rates):.1f} img/s (min {rates[0]:.1f}, max {rates[-1]:.1f})",
             flush=True,
         )
+    # [Agent] Each canvas alone at the largest call size: a canvas whose kernels are slow shows here, not in the mean.
+    calls = make_calls(pictures, max(sizes))
+    for grid in dict.fromkeys(g for g, _ in calls):
+        mine = [call for call in calls if call[0] == grid]
+        count = sum(len(block) for _, block in mine)
+        for _ in range(WARMUPS):
+            time_sweep(E, mine)
+        rates = sorted(count / time_sweep(E, mine) for _ in range(TIMED))
+        print(f"  canvas {grid[0]}x{grid[1]}: {count} pictures, {statistics.median(rates):.1f} img/s", flush=True)
