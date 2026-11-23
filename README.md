@@ -58,8 +58,10 @@ The package serves 140 tokens; the 280 rows come from the same engine with a 280
 | card memory, service | | 3.1 GB, the whole process as nvidia-smi counts it (4.5 GB without expandable segments) |
 
 **Search quality** on [aspect-retrieval-5k](https://huggingface.co/datasets/Francesco/aspect-retrieval-5k), our public
-benchmark: 5,040 Open Images photos, 720 on each of the 7 canvases, each one looked for among 25,040 photos by a typed
-query, a sentence, a person's description, a re-posted copy and a line drawing (`fast-embeddinggemma eval`):
+benchmark. Its `test` split is 5,040 Open Images photos, 720 on each of the 7 canvases, each looked for by a typed query,
+a sentence, a person's description, a re-posted copy and a line drawing. Its `distractors` split is 20,000 more photos
+with no queries, there only to crowd the gallery like a real library, so each photo is found among 25,040
+(`fast-embeddinggemma eval`):
 
 | | short R@1 | sentence R@1 | human R@10 | near-dup R@1 | sketch R@10 |
 |---|---|---|---|---|---|

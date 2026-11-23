@@ -707,7 +707,7 @@ BANNER = {
     "row": 34,
     "gap": 3,
     "tint": (226, 232, 236),
-    "fade": 0.75,
+    "fade": 0.45,
     "reveal": 0.3,
     "text": 1100,
 }
@@ -795,6 +795,18 @@ from datasets import load_dataset
 test = load_dataset("Francesco/aspect-retrieval-5k", "test", revision="v1.0", split="test")
 distractors = load_dataset("Francesco/aspect-retrieval-5k", "distractors", revision="v1.0", split="distractors")
 ```
+
+## The two splits
+
+| split | rows | what it is | what it is for |
+|---|---|---|---|
+| `test` | 5,040 | the photos you look for, 720 per bucket, each with its five queries | the queries: each has one right answer, the photo it was made from |
+| `distractors` | {distractors} | more Open Images photos, with no queries | the crowd: they only go into the gallery, so each photo is found among {gallery} and not just among the 5,040 |
+
+A real photo library is big and full of photos that look alike. With only the 5,040 to beat, the search is easier than
+that, so scores sit higher and models look closer to each other than they are. The distractors make the gallery crowded
+without adding queries, and none of them is ever a right answer: ranking one above the source photo is a miss. Put both
+splits in the gallery and ask with `test`.
 
 ## What you search, and with what
 
