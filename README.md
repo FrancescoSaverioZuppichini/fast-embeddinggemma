@@ -49,17 +49,25 @@ The package serves 140 tokens; the 280 rows come from the same engine with a 280
 | 1,025 to 2,048 | 40.1 ms | 27.1 ms |
 | 2,049 to 8,192 | 70.1 ms | 48.8 ms |
 
-**Start-up, memory, quality**
+**Start-up, memory**
 
 | | HF stack | ours |
 |---|---|---|
 | cold start | 509 s (compile) | about 10 s (engine) / 15-21 s (service, 21 with a cold kernel cache) |
 | card memory, service | | 3.1 GB, the whole process as nvidia-smi counts it (4.5 GB without expandable segments) |
-| search R@10 against fp32 | -0.44 points | INT8 -1.54 points, bf16 -0.69 points |
 
-R@10 is measured on a frozen set of 2,200 pictures and 50 judged text queries, so it moves by about a point either way.
-If search quality matters more than speed, use bf16. Vectors from different precisions are close but not identical, so
-don't mix them in one index.
+**Search quality** on [aspect-retrieval-5k](https://huggingface.co/datasets/Francesco/aspect-retrieval-5k), our public
+benchmark: 5,040 Open Images photos, 720 on each of the 7 canvases, each one looked for among 25,040 photos by a typed
+query, a sentence, a person's description, a re-posted copy and a line drawing (`fast-embeddinggemma eval`):
+
+| | short R@1 | sentence R@1 | human R@10 | near-dup R@1 | sketch R@10 |
+|---|---|---|---|---|---|
+| INT8 (default) | 0.758 | 0.934 | 0.451 | 0.902 | 0.222 |
+| bf16 | 0.757 | 0.934 | 0.450 | 0.902 | 0.221 |
+
+The 95% intervals are about ±0.01, so INT8 costs nothing measurable here. The widest canvas (`8x15`, 16:9 and wider) is
+the weakest for text: short R@1 0.661, human R@10 0.346. Every canvas, with intervals, is on the dataset card. Vectors
+from different precisions are close but not identical, so don't mix them in one index.
 
 ## How it's fast
 
@@ -155,10 +163,15 @@ scores = query @ images.T  # cosine similarity
 
 ```bash
 fast-embeddinggemma embed ./photos --out vectors.npy   # every picture under a folder; the paths go to vectors.txt
-fast-embeddinggemma bench ./photos --sizes 1 8 32      # model-only pictures a second
+fast-embeddinggemma bench --sizes 1 8 32              # model-only pictures a second, on the dataset or ./photos
+fast-embeddinggemma eval --precision int8             # search quality on aspect-retrieval-5k
 fast-embeddinggemma serve                              # the service (needs the [server] extra)
 fast-embeddinggemma convert ./weights                  # Google's checkpoint -> this package's weights + tokenizer
 ```
+
+`eval`, and `bench` without a folder, download [aspect-retrieval-5k](https://huggingface.co/datasets/Francesco/aspect-retrieval-5k)
+at its pinned version (`--revision v1.0`) and need the `eval` extra (`fast-embeddinggemma[eval]`). `--data DIR` reads a
+copy saved with `save_to_disk` instead.
 
 ## The service
 
@@ -252,7 +265,8 @@ Read the model in this order, each file top to bottom: `vision.py`, `text.py`, `
 src/fast_embeddinggemma/
   __init__.py        load, embed_images, embed_texts, process, embed, CANVASES
   preprocessing.py   any picture -> canvas + uint8 patches (CPU)
-  cli.py, bench.py   fast-embeddinggemma embed | bench | serve | convert
+  cli.py, bench.py   fast-embeddinggemma embed | bench | eval | serve | convert
+  quality.py         eval: R@1/5/10 and MRR on aspect-retrieval-5k, per query kind and canvas
   modeling/
     vision.py        Config, VisionLayer, Int8VisionLayer, VisionTower: patches -> 16 layers -> 3x3 average -> image tokens
     text.py          Config, TextLayer, TextTower: tokens -> 24 layers -> 768 numbers per token
@@ -277,6 +291,7 @@ uv sync --all-extras
 uv run ruff check && uv run ruff format --check
 uv run pytest -m "not gpu"                        # preparation, settings, schemas, every kernel compiled for sm_86
 FEG_PICTURES=/your/pictures uv run pytest -m gpu  # the engine, the queries and the service on the card
+uv run --group dataset scripts/build_dataset.py --work DIR  # rebuild aspect-retrieval-5k (OPENROUTER_API_KEY, about $1)
 uv run python -m grpc_tools.protoc -I src --python_out=src --pyi_out=src --grpc_python_out=src \
   src/fast_embeddinggemma/server/embed.proto      # after editing the proto
 ```
