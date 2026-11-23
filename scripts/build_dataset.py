@@ -1011,6 +1011,8 @@ def push(work, card_text):
     card = DatasetCard.load(REPO, token=token)
     for key, value in CARD_YAML.items():
         setattr(card.data, key, value)
+    # [Agent] The viewer and a bare load_dataset open on test, the split with the queries.
+    next(c for c in card.data.configs if c["config_name"] == "test")["default"] = True
     card.text = card_text
     card.push_to_hub(REPO, token=token, commit_message="aspect-retrieval-5k v1.0: the card")
     api = HfApi(token=token)
