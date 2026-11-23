@@ -20,11 +20,14 @@ HEADLINE = {"query_short": "R@1", "query_sentence": "R@1", "query_human": "R@10"
 RESAMPLES = 1000
 
 
-def load_rows(revision: str = REVISION, data: str | None = None):
-    """Both splits at a pinned revision, or a copy saved with `save_to_disk` (what scripts/build_dataset.py writes)."""
+def load_split(name: str, revision: str = REVISION, data: str | None = None):
+    """`test` or `distractors` at a pinned revision, or from a copy saved with `save_to_disk` (what
+    scripts/build_dataset.py writes). On the Hub each split is its own config of the same name: their columns differ."""
     import datasets
 
-    return datasets.load_from_disk(data) if data else datasets.load_dataset(DATASET, revision=revision)
+    if data:
+        return datasets.load_from_disk(data)[name]
+    return datasets.load_dataset(DATASET, name, revision=revision, split=name)
 
 
 def get_ranks(queries: np.ndarray, gallery: np.ndarray) -> np.ndarray:
@@ -57,10 +60,9 @@ def print_report(report: dict) -> None:
 
 
 def run(precision: str, dim: int, revision: str, data: str | None, out: str) -> None:
-    rows = load_rows(revision, data)
-    test = rows["test"]
+    test, distractors = load_split("test", revision, data), load_split("distractors", revision, data)
     model = load(precision)
-    gallery = embed_images(model, list(test["thumb"]) + list(rows["distractors"]["thumb"]), dim)
+    gallery = embed_images(model, list(test["thumb"]) + list(distractors["thumb"]), dim)
     vectors = {k: embed_texts(model, test[k], dim) for k in TEXTS} | {
         k: embed_images(model, test[k], dim) for k in PICTURES
     }

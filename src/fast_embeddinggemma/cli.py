@@ -49,9 +49,9 @@ def bench(args: argparse.Namespace) -> None:
     if args.folder:
         pictures = list_pictures(args.folder)
     else:
-        from .quality import load_rows
+        from .quality import load_split
 
-        pictures = list(load_rows(args.revision, args.data)["test"]["thumb"])
+        pictures = list(load_split("test", args.revision, args.data)["thumb"])
     run(pictures[: args.n], args.precision, tuple(args.sizes), args.threads)
 
 

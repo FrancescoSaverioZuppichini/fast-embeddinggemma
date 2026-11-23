@@ -713,8 +713,8 @@ uses, but nothing in the data depends on that package.
 ```python
 from datasets import load_dataset
 
-data = load_dataset("Francesco/aspect-retrieval-5k", revision="v1.0")
-test, distractors = data["test"], data["distractors"]
+test = load_dataset("Francesco/aspect-retrieval-5k", "test", revision="v1.0", split="test")
+distractors = load_dataset("Francesco/aspect-retrieval-5k", "distractors", revision="v1.0", split="distractors")
 ```
 
 ## What you search, and with what
@@ -820,7 +820,8 @@ Photos dropped and replaced along the way:
 | `author`, `author_url`, `source_url`, `license` | attribution: every photo is CC BY 2.0 |
 | `split`, `sha256` | the Open Images split it came from, and the hash of the downloaded file |
 
-`distractors` has `id`, `canvas`, `width`, `height`, `aspect`, `thumb` and the same attribution columns.
+`distractors` has `id`, `canvas`, `width`, `height`, `aspect`, `thumb` and the same attribution columns. Each split is its
+own config of the same name, because their columns differ.
 
 ## Limitations
 
@@ -995,9 +996,18 @@ def push(work, card_text):
     from huggingface_hub import DatasetCard, HfApi
 
     token = read_env(["HF_TOKEN"])["HF_TOKEN"]
-    load_from_disk(work / "table").push_to_hub(
-        REPO, private=False, max_shard_size="500MB", token=token, commit_message="aspect-retrieval-5k v1.0: the data"
-    )
+    # [Agent] One config per split: the Hub needs every split of a config to share its columns, and the distractors
+    # have no queries.
+    for name, split in load_from_disk(work / "table").items():
+        split.push_to_hub(
+            REPO,
+            config_name=name,
+            split=name,
+            private=False,
+            max_shard_size="500MB",
+            token=token,
+            commit_message=f"aspect-retrieval-5k v1.0: {name}",
+        )
     card = DatasetCard.load(REPO, token=token)
     for key, value in CARD_YAML.items():
         setattr(card.data, key, value)
