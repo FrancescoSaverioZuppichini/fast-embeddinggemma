@@ -2,7 +2,8 @@
 
 Fast embeddings with Google's [EmbeddingGemma 2](https://huggingface.co/google/embeddinggemma-2) on an NVIDIA card. Pictures
 and search queries go into one 768-number space of unit vectors, so cosine similarity is a dot product. It's a small
-PyTorch + Triton engine with a FastAPI + gRPC service on top. INT8 by default, 140 image tokens.
+PyTorch + Triton engine with a FastAPI + gRPC service on top. INT8 by default, 140 image tokens. Search quality is
+measured on our public benchmark, [aspect-retrieval-5k](https://huggingface.co/datasets/Francesco/aspect-retrieval-5k).
 
 ## Numbers
 
@@ -65,9 +66,18 @@ query, a sentence, a person's description, a re-posted copy and a line drawing (
 | INT8 (default) | 0.758 | 0.934 | 0.451 | 0.902 | 0.222 |
 | bf16 | 0.757 | 0.934 | 0.450 | 0.902 | 0.221 |
 
-The 95% intervals are about ±0.01, so INT8 costs nothing measurable here. The widest canvas (`8x15`, 16:9 and wider) is
-the weakest for text: short R@1 0.661, human R@10 0.346. Every canvas, with intervals, is on the dataset card. Vectors
-from different precisions are close but not identical, so don't mix them in one index.
+The 95% intervals are about ±0.01, so INT8 costs nothing measurable here. Vectors from different precisions are close
+but not identical, so don't mix them in one index. Per shape (INT8), the widest photos are the hardest to find by text:
+
+| | 9:16 `15x8` | 2:3 `14x9` | 3:4 `13x10` | 1:1 `11x11` | 4:3 `10x13` | 3:2 `9x14` | 16:9 `8x15` |
+|---|---|---|---|---|---|---|---|
+| short R@1 | 0.824 | 0.796 | 0.793 | 0.775 | 0.733 | 0.726 | 0.661 |
+| sentence R@1 | 0.960 | 0.960 | 0.954 | 0.947 | 0.914 | 0.925 | 0.876 |
+| human R@10 | 0.525 | 0.482 | 0.503 | 0.447 | 0.403 | 0.449 | 0.346 |
+| near-dup R@1 | 0.919 | 0.929 | 0.906 | 0.878 | 0.881 | 0.893 | 0.907 |
+| sketch R@10 | 0.265 | 0.199 | 0.233 | 0.236 | 0.182 | 0.188 | 0.250 |
+
+The intervals per shape are on the [dataset card](https://huggingface.co/datasets/Francesco/aspect-retrieval-5k).
 
 ## How it's fast
 
